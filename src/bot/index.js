@@ -1,11 +1,12 @@
 import 'dotenv/config';
-import { ActivityType, Client, Collection, Events, GatewayIntentBits, REST, Routes } from 'discord.js';
+import { ActivityType, Client, Collection, Events, GatewayIntentBits, REST } from 'discord.js';
 import { commandData, CommandHandler } from './commands.js';
 import { MusicDatabase } from './database.js';
 import { PlaylistService } from './playlistService.js';
 import { SearchClient } from './searchClient.js';
 import { Scheduler } from './scheduler.js';
 import { parseGuildIds } from './config.js';
+import { registerCommands } from './registration.js';
 
 const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID', 'SEARCH_API_URL', 'SEARCH_API_TOKEN'];
 for (const name of required) if (!process.env[name]?.trim()) throw new Error(`${name} is required`);
@@ -21,14 +22,9 @@ client.commands = new Collection(commandData().map((command) => [command.name, c
 client.once(Events.ClientReady, async (readyClient) => {
   const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);
   const body = commandData().map((command) => command.toJSON());
-  if (guildIds.length) {
-    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: [] });
-    await Promise.all(guildIds.map((guildId) => rest.put(
-      Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, guildId),
-      { body },
-    )));
-  } else {
-    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body });
+  const failures = await registerCommands({ rest, clientId: process.env.DISCORD_CLIENT_ID, guildIds, body });
+  for (const failure of failures) {
+    console.error(`Guild command registration failed: ${failure.guildId}`, failure.error);
   }
   readyClient.user.setPresence({ activities: [{ name: '/도움말', type: ActivityType.Listening }], status: 'online' });
   new Scheduler({

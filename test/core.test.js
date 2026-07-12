@@ -9,6 +9,7 @@ import { PlaylistService } from '../src/bot/playlistService.js';
 import { enrichMusicVideos, parseMusicItem, parseSearch } from '../src/search/resultParser.js';
 import { commandData } from '../src/bot/commands.js';
 import { parseGuildIds } from '../src/bot/config.js';
+import { registerCommands } from '../src/bot/registration.js';
 
 test('general YouTube search parsing handles iterables, author objects, and length text', () => {
   const results = new Set([
@@ -101,4 +102,22 @@ test('여러 길드 ID를 중복 없이 읽는다', () => {
     '1263151654883295293',
     '1505572380905439403',
   ]);
+});
+
+test('한 길드 등록이 실패해도 나머지 길드를 등록한다', async () => {
+  const calls = [];
+  const rest = {
+    async put(route) {
+      calls.push(route);
+      if (route.includes('1263151654883295293')) throw new Error('Missing Access');
+    },
+  };
+  const failures = await registerCommands({
+    rest,
+    clientId: 'app',
+    guildIds: ['1263151654883295293', '1505572380905439403'],
+    body: [],
+  });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(failures.map(({ guildId }) => guildId), ['1263151654883295293']);
 });
