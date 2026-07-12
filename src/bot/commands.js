@@ -11,6 +11,7 @@ import {
 } from 'discord.js';
 import { DAYS, MAX_SONGS } from '../shared/constants.js';
 import { songLabel } from './playlistService.js';
+import { createLockCard, renderGuideCanvas, renderLockCanvas } from './canvas.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
@@ -128,7 +129,22 @@ export class CommandHandler {
     }
     const requestChannel = interaction.options.getChannel('신청채널');
     const announcementChannel = interaction.options.getChannel('공지채널');
+    const previous = this.database.guildChannels(interaction.guildId);
     this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id);
+    const payload = { files: [{ attachment: await renderGuideCanvas(), name: 'miku-guide.png' }] };
+    let guideMessageId = previous?.guide_message_id ?? null;
+    if (guideMessageId && previous.request_channel_id === requestChannel.id) {
+      const message = await requestChannel.messages.fetch(guideMessageId).catch(() => null);
+      if (message) await message.edit({ ...payload, attachments: [] });
+      else guideMessageId = null;
+    } else if (guideMessageId) {
+      const previousChannel = await interaction.client.channels.fetch(previous.request_channel_id).catch(() => null);
+      const previousMessage = await previousChannel?.messages.fetch(guideMessageId).catch(() => null);
+      await previousMessage?.delete().catch(() => null);
+      guideMessageId = null;
+    }
+    if (!guideMessageId) guideMessageId = (await requestChannel.send(payload)).id;
+    this.database.setGuildGuideMessage(interaction.guildId, guideMessageId);
     await interaction.reply({
       content: `신청 채널을 ${requestChannel}, 공지 채널을 ${announcementChannel}(으)로 설정했습니다.`,
       flags: MessageFlags.Ephemeral,
@@ -184,8 +200,17 @@ export class CommandHandler {
     const day = interaction.options.getString('요일');
     const locked = interaction.options.getString('상태') === '잠금';
     const user = interaction.options.getUser('유저');
-    this.database.setLock(day, locked, locked ? user?.id ?? null : null);
-    await interaction.reply(`${day}요일 플레이리스트를 ${locked ? `잠갔습니다${user ? ` (${user} 전용)` : ''}` : '열었습니다'}.`);
+    const deletedCount = this.database.setLock(day, locked, locked ? user?.id ?? null : null);
+    if (!locked) {
+      await interaction.reply(`${day}요일 플레이리스트를 열었습니다.`);
+      return;
+    }
+    const member = user ? interaction.options.getMember('유저') : null;
+    const displayName = member?.displayName ?? user?.globalName ?? user?.username;
+    const avatarUrl = user?.displayAvatarURL({ extension: 'png', size: 256 });
+    const attachment = await renderLockCanvas(createLockCard({ day, displayName, avatarUrl, deletedCount }));
+    await interaction.reply({ files: [{ attachment, name: 'miku-lock.png' }] });
+    if (user) await interaction.followUp({ content: `<@${user.id}>`, allowedMentions: { users: [user.id] } });
   }
 
   async shuffle(interaction) {

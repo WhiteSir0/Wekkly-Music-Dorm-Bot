@@ -29,10 +29,15 @@ export class MusicDatabase {
       CREATE TABLE IF NOT EXISTS guild_settings (
         guild_id TEXT PRIMARY KEY,
         request_channel_id TEXT NOT NULL,
-        announcement_channel_id TEXT NOT NULL
+        announcement_channel_id TEXT NOT NULL,
+        guide_message_id TEXT
       );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    const guildColumns = this.db.prepare('PRAGMA table_info(guild_settings)').all();
+    if (!guildColumns.some(({ name }) => name === 'guide_message_id')) {
+      this.db.exec('ALTER TABLE guild_settings ADD COLUMN guide_message_id TEXT');
+    }
     const insertDay = this.db.prepare('INSERT OR IGNORE INTO day_settings(day) VALUES (?)');
     for (const day of DAYS) insertDay.run(day);
   }
@@ -71,12 +76,13 @@ export class MusicDatabase {
 
   setLock(day, locked, userId = null) {
     this.db.prepare('UPDATE day_settings SET locked=?, exclusive_user_id=? WHERE day=?').run(locked ? 1 : 0, userId, day);
-    if (locked) this.db.prepare('DELETE FROM playlists WHERE day=?').run(day);
+    if (!locked) return 0;
+    return Number(this.db.prepare('DELETE FROM playlists WHERE day=?').run(day).changes);
   }
 
   guildChannels(guildId) {
     return this.db.prepare(`
-      SELECT guild_id, request_channel_id, announcement_channel_id
+      SELECT guild_id, request_channel_id, announcement_channel_id, guide_message_id
       FROM guild_settings WHERE guild_id=?
     `).get(guildId) ?? null;
   }
@@ -89,6 +95,10 @@ export class MusicDatabase {
         request_channel_id=excluded.request_channel_id,
         announcement_channel_id=excluded.announcement_channel_id
     `).run(guildId, requestChannelId, announcementChannelId);
+  }
+
+  setGuildGuideMessage(guildId, messageId) {
+    this.db.prepare('UPDATE guild_settings SET guide_message_id=? WHERE guild_id=?').run(messageId, guildId);
   }
 
   resetWeekly() {

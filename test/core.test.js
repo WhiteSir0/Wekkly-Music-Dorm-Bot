@@ -12,6 +12,8 @@ import { parseGuildIds } from '../src/bot/config.js';
 import { registerCommands } from '../src/bot/registration.js';
 import { Scheduler } from '../src/bot/scheduler.js';
 import { isTailscaleIpv4 } from '../src/search/config.js';
+import { GUIDE_COPY, renderGuideCanvas } from '../src/bot/canvas.js';
+import { DatabaseSync } from 'node:sqlite';
 
 test('general YouTube search parsing handles iterables, author objects, and length text', () => {
   const results = new Set([
@@ -112,13 +114,103 @@ test('길드별 채널 설정을 SQLite에 영구 저장한다', () => {
     database = new MusicDatabase(path);
 
     assert.deepEqual({ ...database.guildChannels('guild-a') }, {
-      guild_id: 'guild-a', request_channel_id: 'request-a', announcement_channel_id: 'announcement-a',
+      guild_id: 'guild-a', request_channel_id: 'request-a', announcement_channel_id: 'announcement-a', guide_message_id: null,
     });
     assert.equal(database.guildChannels('guild-b'), null);
   } finally {
     database?.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('플리 잠금은 삭제한 곡 수를 반환한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-lock-'));
+  let database;
+  try {
+    database = new MusicDatabase(join(directory, 'music.db'));
+    database.addSong({ day: '월', videoId: 'one', title: 'One', artist: null, url: 'https://youtu.be/one', userId: 'user-a' });
+    database.addSong({ day: '월', videoId: 'two', title: 'Two', artist: null, url: 'https://youtu.be/two', userId: 'user-b' });
+
+    assert.equal(database.setLock('월', true, 'user-a'), 2);
+    assert.equal(database.setLock('월', false), 0);
+  } finally {
+    database?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('길드 안내 메시지 ID를 안전하게 마이그레이션하고 영구 저장한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-guide-'));
+  let database;
+  try {
+    const path = join(directory, 'music.db');
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE guild_settings (
+        guild_id TEXT PRIMARY KEY,
+        request_channel_id TEXT NOT NULL,
+        announcement_channel_id TEXT NOT NULL
+      );
+      INSERT INTO guild_settings VALUES ('guild-a', 'request-a', 'announcement-a');
+    `);
+    legacy.close();
+    database = new MusicDatabase(path);
+    database.setGuildGuideMessage('guild-a', 'guide-a');
+    database.close();
+    database = new MusicDatabase(path);
+
+    assert.equal(database.guildChannels('guild-a').guide_message_id, 'guide-a');
+  } finally {
+    database?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('미쿠 안내 캔버스를 PNG로 렌더링한다', async () => {
+  const guide = await renderGuideCanvas();
+
+  assert.deepEqual(guide.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  assert.ok(guide.length > 10_000);
+});
+
+test('안내 캔버스 문구는 자치회 용어를 사용한다', () => {
+  const guideText = JSON.stringify(GUIDE_COPY);
+
+  assert.match(guideText, /자치회 최소 3명/);
+  assert.doesNotMatch(guideText, /평의회/);
+});
+
+test('채널 설정은 저장된 안내 메시지를 새로 만들지 않고 교체한다', async () => {
+  const edits = [];
+  const sends = [];
+  let savedMessageId;
+  const guideMessage = { edit: async (payload) => edits.push(payload) };
+  const requestChannel = {
+    id: 'request-a', toString: () => '<#request-a>',
+    messages: { fetch: async () => guideMessage },
+    send: async (payload) => { sends.push(payload); return { id: 'new-guide' }; },
+  };
+  const announcementChannel = { id: 'announcement-a', toString: () => '<#announcement-a>' };
+  const handler = new CommandHandler({
+    database: {
+      guildChannels: () => ({ request_channel_id: 'request-a', announcement_channel_id: 'announcement-a', guide_message_id: 'guide-a' }),
+      setGuildChannels: () => {},
+      setGuildGuideMessage: (_guildId, messageId) => { savedMessageId = messageId; },
+    },
+    playlist: {}, search: {}, guildIds: ['guild-a'],
+  });
+  await handler.execute({
+    commandName: '채널설정', guildId: 'guild-a',
+    memberPermissions: { has: () => true },
+    options: { getChannel: (name) => name === '신청채널' ? requestChannel : announcementChannel },
+    reply: async () => {},
+  });
+
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0].files[0].name, 'miku-guide.png');
+  assert.deepEqual(edits[0].attachments, []);
+  assert.equal(sends.length, 0);
+  assert.equal(savedMessageId, 'guide-a');
 });
 
 test('신청 명령은 길드에 설정된 신청 채널 밖에서 거절된다', async () => {
