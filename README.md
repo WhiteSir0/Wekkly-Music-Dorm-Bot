@@ -15,7 +15,7 @@ cp .env.search.example .env.search
 docker compose --env-file .env.search -f compose.search.yml up -d --build
 ```
 
-`.env.search`의 `SEARCH_API_TOKEN`을 임의의 긴 값으로 설정합니다. `4310/tcp`는 인터넷에 공개하지 않고 Tailscale 인터페이스에서만 허용합니다.
+`.env.search`의 `SEARCH_API_TOKEN`을 임의의 긴 값으로 설정하고 `SEARCH_BIND_ADDRESS`에는 Oracle 서버의 Tailscale IPv4 주소를 입력합니다. `4310/tcp`는 인터넷에 공개하지 않습니다.
 
 ```bash
 sudo ufw deny 4310/tcp

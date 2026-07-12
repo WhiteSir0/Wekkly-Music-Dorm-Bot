@@ -8,6 +8,7 @@ import { MusicDatabase } from '../src/bot/database.js';
 import { PlaylistService } from '../src/bot/playlistService.js';
 import { enrichMusicVideos, parseMusicItem, parseSearch } from '../src/search/resultParser.js';
 import { commandData } from '../src/bot/commands.js';
+import { parseGuildIds } from '../src/bot/config.js';
 
 test('general YouTube search parsing handles iterables, author objects, and length text', () => {
   const results = new Set([
@@ -93,4 +94,11 @@ test('주간 중복곡과 사용자 2곡 제한을 적용한다', () => {
 test('Discord 명령어 JSON이 모두 생성된다', () => {
   const commands = commandData().map((command) => command.toJSON());
   assert.deepEqual(commands.map(({ name }) => name), ['도움말', '신청', '보기', '플리제한', '셔플', '삭제', 'db초기화']);
+});
+
+test('여러 길드 ID를 중복 없이 읽는다', () => {
+  assert.deepEqual(parseGuildIds('1263151654883295293, 1505572380905439403,1263151654883295293'), [
+    '1263151654883295293',
+    '1505572380905439403',
+  ]);
 });

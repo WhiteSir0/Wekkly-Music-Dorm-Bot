@@ -5,6 +5,7 @@ import { MusicDatabase } from './database.js';
 import { PlaylistService } from './playlistService.js';
 import { SearchClient } from './searchClient.js';
 import { Scheduler } from './scheduler.js';
+import { parseGuildIds } from './config.js';
 
 const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID', 'SEARCH_API_URL', 'SEARCH_API_TOKEN'];
 for (const name of required) if (!process.env[name]?.trim()) throw new Error(`${name} is required`);
@@ -13,14 +14,19 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const database = new MusicDatabase(process.env.DB_PATH ?? '/app/data/music.db');
 const playlist = new PlaylistService(database);
 const search = new SearchClient(process.env.SEARCH_API_URL, process.env.SEARCH_API_TOKEN);
-const handler = new CommandHandler({ database, playlist, search, guildId: process.env.DISCORD_GUILD_ID?.trim() || null });
+const guildIds = parseGuildIds(process.env.DISCORD_GUILD_IDS);
+const handler = new CommandHandler({ database, playlist, search, guildIds });
 client.commands = new Collection(commandData().map((command) => [command.name, command]));
 
 client.once(Events.ClientReady, async (readyClient) => {
   const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);
   const body = commandData().map((command) => command.toJSON());
-  if (process.env.DISCORD_GUILD_ID) {
-    await rest.put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, process.env.DISCORD_GUILD_ID), { body });
+  if (guildIds.length) {
+    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: [] });
+    await Promise.all(guildIds.map((guildId) => rest.put(
+      Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, guildId),
+      { body },
+    )));
   } else {
     await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body });
   }

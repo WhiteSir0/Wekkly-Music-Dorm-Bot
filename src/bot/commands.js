@@ -55,16 +55,16 @@ function listEmbed(day, songs, shuffled = false) {
 }
 
 export class CommandHandler {
-  constructor({ database, playlist, search, guildId }) {
+  constructor({ database, playlist, search, guildIds }) {
     this.database = database;
     this.playlist = playlist;
     this.search = search;
-    this.guildId = guildId;
+    this.guildIds = new Set(guildIds);
     this.pending = new Map();
   }
 
   async execute(interaction) {
-    if (this.guildId && interaction.guildId !== this.guildId) {
+    if (this.guildIds.size && !this.guildIds.has(interaction.guildId)) {
       await interaction.reply({ content: '지정된 서버에서만 사용할 수 있습니다.', flags: MessageFlags.Ephemeral });
       return;
     }
