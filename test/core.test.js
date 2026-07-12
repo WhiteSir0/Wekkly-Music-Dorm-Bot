@@ -11,6 +11,7 @@ import { commandData } from '../src/bot/commands.js';
 import { parseGuildIds } from '../src/bot/config.js';
 import { registerCommands } from '../src/bot/registration.js';
 import { Scheduler } from '../src/bot/scheduler.js';
+import { isTailscaleIpv4 } from '../src/search/config.js';
 
 test('general YouTube search parsing handles iterables, author objects, and length text', () => {
   const results = new Set([
@@ -140,4 +141,50 @@ test('마감 공지를 보내지 못하면 완료 처리하지 않는다', async
   });
   await scheduler.run();
   assert.equal(meta.has('last_close'), false);
+});
+
+test('일부 마감 공지만 실패하면 성공한 채널에는 다시 보내지 않는다', async () => {
+  const meta = new Map();
+  let requestSends = 0;
+  let announcementSends = 0;
+  const announcement = {
+    isTextBased: () => true,
+    send: async () => {
+      announcementSends += 1;
+      if (announcementSends === 1) throw new Error('temporary');
+    },
+  };
+  const request = {
+    isTextBased: () => true,
+    send: async () => {
+      requestSends += 1;
+      return { forward: async () => announcement.send() };
+    },
+  };
+  const database = {
+    meta: (key) => meta.get(key) ?? null,
+    setMeta: (key, value) => meta.set(key, value),
+    daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
+    setting: () => ({ locked: 0, exclusive_user_id: null }),
+  };
+  const scheduler = new Scheduler({
+    client: { channels: { fetch: async (id) => id === 'request' ? request : announcement } },
+    database,
+    requestChannelId: 'request',
+    announcementChannelId: 'announcement',
+    now: () => new Date('2026-07-13T14:40:00Z'),
+  });
+  await assert.rejects(() => scheduler.run(), /temporary/);
+  await scheduler.run();
+  assert.equal(requestSends, 1);
+  assert.equal(announcementSends, 2);
+  assert.equal(meta.has('last_close'), true);
+});
+
+test('검색 서버는 Tailscale IPv4만 외부 바인딩으로 허용한다', () => {
+  assert.equal(isTailscaleIpv4('100.107.167.112'), true);
+  assert.equal(isTailscaleIpv4('100.64.0.1'), true);
+  assert.equal(isTailscaleIpv4('100.127.255.254'), true);
+  assert.equal(isTailscaleIpv4('0.0.0.0'), false);
+  assert.equal(isTailscaleIpv4('100.128.0.1'), false);
 });

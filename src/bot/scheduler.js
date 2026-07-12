@@ -47,26 +47,32 @@ export class Scheduler {
     if (!songs.length) return;
     const setting = this.database.setting(day);
     const exclusiveUserId = setting.locked ? setting.exclusive_user_id : null;
-    let sent = false;
+    const requestKey = `${key}:request`;
+    const announcementKey = `${key}:announcement`;
     if (exclusiveUserId && this.announcementChannelId) {
       const channel = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
-      if (channel?.isTextBased()) {
+      if (channel?.isTextBased() && this.database.meta(announcementKey) !== 'sent') {
         await channel.send({ content: `<@${exclusiveUserId}> 상점 플리입니다.`, embeds: [listEmbed(day, songs)] });
-        sent = true;
+        this.database.setMeta(announcementKey, 'sent');
       }
     } else if (this.requestChannelId && this.announcementChannelId) {
       const request = await this.client.channels.fetch(this.requestChannelId).catch(() => null);
       const announcement = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
       if (request?.isTextBased() && announcement?.isTextBased()) {
         const payload = { embeds: [listEmbed(day, songs, true)] };
-        const message = await request.send(payload);
-        if (this.requestChannelId !== this.announcementChannelId) {
-          if (typeof message.forward === 'function') await message.forward(announcement);
-          else await announcement.send(payload);
+        if (this.database.meta(requestKey) !== 'sent') {
+          await request.send(payload);
+          this.database.setMeta(requestKey, 'sent');
         }
-        sent = true;
+        if (this.requestChannelId === this.announcementChannelId) {
+          this.database.setMeta(announcementKey, 'sent');
+        } else if (this.database.meta(announcementKey) !== 'sent') {
+          await announcement.send(payload);
+          this.database.setMeta(announcementKey, 'sent');
+        }
       }
     }
-    if (sent) this.database.setMeta('last_close', key);
+    if (this.database.meta(announcementKey) === 'sent'
+      && (exclusiveUserId || this.database.meta(requestKey) === 'sent')) this.database.setMeta('last_close', key);
   }
 }

@@ -4,9 +4,13 @@ import { timingSafeEqual } from 'node:crypto';
 import { Innertube, UniversalCache } from 'youtubei.js';
 import { z } from 'zod';
 import { enrichMusicVideos, parseSearch } from './resultParser.js';
+import { isTailscaleIpv4 } from './config.js';
 
 const token = process.env.SEARCH_API_TOKEN?.trim();
 if (!token) throw new Error('SEARCH_API_TOKEN is required');
+if (token.length < 32) throw new Error('SEARCH_API_TOKEN must be at least 32 characters');
+const bindAddress = process.env.SEARCH_BIND_ADDRESS?.trim() || '127.0.0.1';
+if (bindAddress !== '127.0.0.1' && !isTailscaleIpv4(bindAddress)) throw new Error('SEARCH_BIND_ADDRESS must be loopback or Tailscale IPv4');
 const host = process.env.SEARCH_HOST ?? '0.0.0.0';
 const port = Number(process.env.SEARCH_PORT ?? 4310);
 const bodySchema = z.object({ query: z.string().trim().min(1).max(100), limit: z.number().int().min(1).max(10).default(3) });

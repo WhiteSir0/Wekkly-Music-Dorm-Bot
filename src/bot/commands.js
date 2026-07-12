@@ -118,8 +118,13 @@ export class CommandHandler {
       await interaction.editReply('검색 결과가 없습니다.');
       return;
     }
+    const now = Date.now();
+    for (const [key, pending] of this.pending) {
+      if (pending.expiresAt < now || pending.userId === interaction.user.id) this.pending.delete(key);
+    }
+    if (this.pending.size >= 500) this.pending.delete(this.pending.keys().next().value);
     const token = randomUUID().slice(0, 12);
-    this.pending.set(token, { userId: interaction.user.id, day, results, expiresAt: Date.now() + 10 * 60_000 });
+    this.pending.set(token, { userId: interaction.user.id, day, results, expiresAt: now + 10 * 60_000 });
     const embeds = results.map((song, index) => {
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`${index + 1}. ${songLabel(song)}`).setURL(song.url);
       if (song.thumbnailUrl) embed.setImage(song.thumbnailUrl);

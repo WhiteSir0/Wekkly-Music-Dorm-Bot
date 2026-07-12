@@ -8,14 +8,16 @@ import { Scheduler } from './scheduler.js';
 import { parseGuildIds } from './config.js';
 import { registerCommands } from './registration.js';
 
-const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID', 'SEARCH_API_URL', 'SEARCH_API_TOKEN'];
+const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID', 'DISCORD_GUILD_IDS', 'SEARCH_API_URL', 'SEARCH_API_TOKEN'];
 for (const name of required) if (!process.env[name]?.trim()) throw new Error(`${name} is required`);
+if (process.env.SEARCH_API_TOKEN.trim().length < 32) throw new Error('SEARCH_API_TOKEN must be at least 32 characters');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const database = new MusicDatabase(process.env.DB_PATH ?? '/app/data/music.db');
 const playlist = new PlaylistService(database);
 const search = new SearchClient(process.env.SEARCH_API_URL, process.env.SEARCH_API_TOKEN);
 const guildIds = parseGuildIds(process.env.DISCORD_GUILD_IDS);
+if (!guildIds.length) throw new Error('DISCORD_GUILD_IDS is required');
 const handler = new CommandHandler({ database, playlist, search, guildIds });
 client.commands = new Collection(commandData().map((command) => [command.name, command]));
 
