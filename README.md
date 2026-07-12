@@ -36,6 +36,10 @@ docker compose -f compose.bot.yml up -d --build
 SEARCH_API_URL=http://100.x.x.x:4310
 ```
 
+봇을 서버에 추가한 뒤 관리자가 `/채널설정 신청채널 공지채널`을 실행합니다. 설정은 SQLite에 서버별로 저장되며, `/신청`은 지정된 신청 채널에서만 동작하고 마감 플레이리스트는 지정된 공지 채널로 전송됩니다. `SONG_REQUEST_CHANNEL_ID`와 `SONG_ANNOUNCEMENT_CHANNEL_ID`는 아직 설정하지 않은 서버를 위한 선택적 폴백입니다.
+
+`/정보`에서 봇 정보와 공개 원본 소스 링크를 확인할 수 있습니다.
+
 ## 테스트
 
 ```bash
@@ -44,4 +48,6 @@ npm test
 
 ## 라이선스와 원저작물
 
-이 프로젝트는 `koori0831/YouTube-Music-Weekly-Scheduler-Bot`을 기반으로 수정되었습니다. 원저작물과 이 저장소의 배포 조건은 [LICENSE](LICENSE), 상세 귀속은 [NOTICE](NOTICE)를 확인하세요.
+공개 소스: [WhiteSir0/Wekkly-Music-Dorm-Bot](https://github.com/WhiteSir0/Wekkly-Music-Dorm-Bot)
+
+이 프로젝트는 `koori0831/YouTube-Music-Weekly-Scheduler-Bot`을 기반으로 수정되었습니다. 기존 원저작자 귀속과 배포 조건은 그대로 유지됩니다. [LICENSE](LICENSE)와 상세 귀속인 [NOTICE](NOTICE)를 확인하세요.

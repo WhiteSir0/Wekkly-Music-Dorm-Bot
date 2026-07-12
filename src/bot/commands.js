@@ -3,6 +3,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
@@ -20,9 +21,16 @@ function dayOption(builder) {
 export function commandData() {
   return [
     new SlashCommandBuilder().setName('도움말').setDescription('봇 사용법과 운영 규칙을 확인합니다.'),
+    new SlashCommandBuilder().setName('정보').setDescription('봇 정보와 원본 소스를 확인합니다.'),
     dayOption(new SlashCommandBuilder().setName('신청').setDescription('요일 플레이리스트에 노래를 신청합니다.')
       .addStringOption((option) => option.setName('제목').setDescription('검색할 곡 제목').setRequired(true).setMaxLength(100))),
     dayOption(new SlashCommandBuilder().setName('보기').setDescription('요일 플레이리스트를 확인합니다.')),
+    new SlashCommandBuilder().setName('채널설정').setDescription('이 서버의 신청 및 공지 채널을 설정합니다.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((option) => option.setName('신청채널').setDescription('노래 신청 명령을 사용할 채널')
+        .setRequired(true).addChannelTypes(ChannelType.GuildText))
+      .addChannelOption((option) => option.setName('공지채널').setDescription('마감 플레이리스트를 공지할 채널')
+        .setRequired(true).addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('플리제한').setDescription('요일 플레이리스트를 잠금 또는 해제합니다.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addStringOption((option) => option.setName('요일').setDescription('요일').setRequired(true).addChoices(...dayChoices))
@@ -55,11 +63,12 @@ function listEmbed(day, songs, shuffled = false) {
 }
 
 export class CommandHandler {
-  constructor({ database, playlist, search, guildIds }) {
+  constructor({ database, playlist, search, guildIds, fallbackChannels = null }) {
     this.database = database;
     this.playlist = playlist;
     this.search = search;
     this.guildIds = new Set(guildIds);
+    this.fallbackChannels = fallbackChannels;
     this.pending = new Map();
   }
 
@@ -69,7 +78,8 @@ export class CommandHandler {
       return;
     }
     const handlers = {
-      도움말: () => this.help(interaction), 신청: () => this.request(interaction), 보기: () => this.view(interaction),
+      도움말: () => this.help(interaction), 정보: () => this.info(interaction), 신청: () => this.request(interaction), 보기: () => this.view(interaction),
+      채널설정: () => this.configureChannels(interaction),
       플리제한: () => this.lock(interaction), 셔플: () => this.shuffle(interaction), 삭제: () => this.delete(interaction),
       db초기화: () => this.reset(interaction),
     };
@@ -105,7 +115,36 @@ export class CommandHandler {
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 
+  async info(interaction) {
+    await interaction.reply({
+      content: 'Wekkly Music Dorm Bot\n원본 소스: https://github.com/WhiteSir0/Wekkly-Music-Dorm-Bot',
+    });
+  }
+
+  async configureChannels(interaction) {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      await interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const requestChannel = interaction.options.getChannel('신청채널');
+    const announcementChannel = interaction.options.getChannel('공지채널');
+    this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id);
+    await interaction.reply({
+      content: `신청 채널을 ${requestChannel}, 공지 채널을 ${announcementChannel}(으)로 설정했습니다.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   async request(interaction) {
+    const channels = this.database.guildChannels(interaction.guildId) ?? this.fallbackChannels;
+    if (!channels) {
+      await interaction.reply({ content: '서버 관리자가 먼저 `/채널설정`을 실행해야 합니다.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (interaction.channelId !== channels.request_channel_id) {
+      await interaction.reply({ content: `노래 신청은 <#${channels.request_channel_id}> 채널에서만 사용할 수 있습니다.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
     const day = interaction.options.getString('요일');
     const validation = this.playlist.validate(interaction.user.id, day);
     if (!validation.ok) {

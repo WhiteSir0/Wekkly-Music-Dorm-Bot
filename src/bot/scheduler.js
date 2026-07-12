@@ -8,11 +8,11 @@ function sundayKey(current) {
 }
 
 export class Scheduler {
-  constructor({ client, database, requestChannelId, announcementChannelId, now = () => new Date() }) {
+  constructor({ client, database, guildIds, fallbackChannels = null, now = () => new Date() }) {
     this.client = client;
     this.database = database;
-    this.requestChannelId = requestChannelId;
-    this.announcementChannelId = announcementChannelId;
+    this.guildIds = guildIds;
+    this.fallbackChannels = fallbackChannels;
     this.now = now;
   }
 
@@ -42,29 +42,37 @@ export class Scheduler {
     const day = targets[current.getUTCDay()];
     if (!day) return;
     const key = `${kstDate(this.now())}:${day}`;
-    if (this.database.meta('last_close') === key) return;
     const songs = this.database.daySongs(day);
     if (!songs.length) return;
     const setting = this.database.setting(day);
     const exclusiveUserId = setting.locked ? setting.exclusive_user_id : null;
-    const requestKey = `${key}:request`;
-    const announcementKey = `${key}:announcement`;
-    if (exclusiveUserId && this.announcementChannelId) {
-      const channel = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
+    for (const guildId of this.guildIds) {
+      const channels = this.database.guildChannels(guildId) ?? this.fallbackChannels;
+      if (channels) await this.closeGuild({ guildId, channels, key, day, songs, exclusiveUserId });
+    }
+  }
+
+  async closeGuild({ guildId, channels, key, day, songs, exclusiveUserId }) {
+    const lastCloseKey = `last_close:${guildId}`;
+    if (this.database.meta(lastCloseKey) === key) return;
+    const requestKey = `${key}:${guildId}:request`;
+    const announcementKey = `${key}:${guildId}:announcement`;
+    if (exclusiveUserId) {
+      const channel = await this.client.channels.fetch(channels.announcement_channel_id).catch(() => null);
       if (channel?.isTextBased() && this.database.meta(announcementKey) !== 'sent') {
         await channel.send({ content: `<@${exclusiveUserId}> 상점 플리입니다.`, embeds: [listEmbed(day, songs)] });
         this.database.setMeta(announcementKey, 'sent');
       }
-    } else if (this.requestChannelId && this.announcementChannelId) {
-      const request = await this.client.channels.fetch(this.requestChannelId).catch(() => null);
-      const announcement = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
+    } else {
+      const request = await this.client.channels.fetch(channels.request_channel_id).catch(() => null);
+      const announcement = await this.client.channels.fetch(channels.announcement_channel_id).catch(() => null);
       if (request?.isTextBased() && announcement?.isTextBased()) {
         const payload = { embeds: [listEmbed(day, songs, true)] };
         if (this.database.meta(requestKey) !== 'sent') {
           await request.send(payload);
           this.database.setMeta(requestKey, 'sent');
         }
-        if (this.requestChannelId === this.announcementChannelId) {
+        if (channels.request_channel_id === channels.announcement_channel_id) {
           this.database.setMeta(announcementKey, 'sent');
         } else if (this.database.meta(announcementKey) !== 'sent') {
           await announcement.send(payload);
@@ -73,6 +81,6 @@ export class Scheduler {
       }
     }
     if (this.database.meta(announcementKey) === 'sent'
-      && (exclusiveUserId || this.database.meta(requestKey) === 'sent')) this.database.setMeta('last_close', key);
+      && (exclusiveUserId || this.database.meta(requestKey) === 'sent')) this.database.setMeta(lastCloseKey, key);
   }
 }

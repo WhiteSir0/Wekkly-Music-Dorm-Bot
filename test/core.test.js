@@ -7,7 +7,7 @@ import { allowedDays, secondsFromText } from '../src/shared/constants.js';
 import { MusicDatabase } from '../src/bot/database.js';
 import { PlaylistService } from '../src/bot/playlistService.js';
 import { enrichMusicVideos, parseMusicItem, parseSearch } from '../src/search/resultParser.js';
-import { commandData } from '../src/bot/commands.js';
+import { commandData, CommandHandler } from '../src/bot/commands.js';
 import { parseGuildIds } from '../src/bot/config.js';
 import { registerCommands } from '../src/bot/registration.js';
 import { Scheduler } from '../src/bot/scheduler.js';
@@ -96,7 +96,45 @@ test('주간 중복곡과 사용자 2곡 제한을 적용한다', () => {
 
 test('Discord 명령어 JSON이 모두 생성된다', () => {
   const commands = commandData().map((command) => command.toJSON());
-  assert.deepEqual(commands.map(({ name }) => name), ['도움말', '신청', '보기', '플리제한', '셔플', '삭제', 'db초기화']);
+  assert.deepEqual(commands.map(({ name }) => name), ['도움말', '정보', '신청', '보기', '채널설정', '플리제한', '셔플', '삭제', 'db초기화']);
+  assert.equal(commands.find(({ name }) => name === '정보').default_member_permissions, undefined);
+  assert.equal(commands.find(({ name }) => name === '채널설정').default_member_permissions, '8');
+});
+
+test('길드별 채널 설정을 SQLite에 영구 저장한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-settings-'));
+  let database;
+  try {
+    const path = join(directory, 'music.db');
+    database = new MusicDatabase(path);
+    database.setGuildChannels('guild-a', 'request-a', 'announcement-a');
+    database.close();
+    database = new MusicDatabase(path);
+
+    assert.deepEqual({ ...database.guildChannels('guild-a') }, {
+      guild_id: 'guild-a', request_channel_id: 'request-a', announcement_channel_id: 'announcement-a',
+    });
+    assert.equal(database.guildChannels('guild-b'), null);
+  } finally {
+    database?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('신청 명령은 길드에 설정된 신청 채널 밖에서 거절된다', async () => {
+  const replies = [];
+  const handler = new CommandHandler({
+    database: { guildChannels: () => ({ request_channel_id: 'request-channel' }) },
+    playlist: { validate: () => assert.fail('playlist validation should not run') },
+    search: { search: () => assert.fail('search should not run') },
+    guildIds: ['guild-a'],
+  });
+  await handler.execute({
+    commandName: '신청', guildId: 'guild-a', channelId: 'other-channel',
+    reply: async (payload) => replies.push(payload),
+  });
+
+  assert.match(replies[0].content, /<#request-channel>/);
 });
 
 test('여러 길드 ID를 중복 없이 읽는다', () => {
@@ -131,16 +169,16 @@ test('마감 공지를 보내지 못하면 완료 처리하지 않는다', async
     setMeta: (key, value) => meta.set(key, value),
     daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
     setting: () => ({ locked: 0, exclusive_user_id: null }),
+    guildChannels: () => null,
   };
   const scheduler = new Scheduler({
     client: { channels: { fetch: async () => null } },
     database,
-    requestChannelId: null,
-    announcementChannelId: null,
+    guildIds: ['guild-a'],
     now: () => new Date('2026-07-13T14:40:00Z'),
   });
   await scheduler.run();
-  assert.equal(meta.has('last_close'), false);
+  assert.equal(meta.has('last_close:guild-a'), false);
 });
 
 test('일부 마감 공지만 실패하면 성공한 채널에는 다시 보내지 않는다', async () => {
@@ -166,19 +204,45 @@ test('일부 마감 공지만 실패하면 성공한 채널에는 다시 보내�
     setMeta: (key, value) => meta.set(key, value),
     daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
     setting: () => ({ locked: 0, exclusive_user_id: null }),
+    guildChannels: () => null,
   };
   const scheduler = new Scheduler({
     client: { channels: { fetch: async (id) => id === 'request' ? request : announcement } },
     database,
-    requestChannelId: 'request',
-    announcementChannelId: 'announcement',
+    guildIds: ['guild-a'],
+    fallbackChannels: { request_channel_id: 'request', announcement_channel_id: 'announcement' },
     now: () => new Date('2026-07-13T14:40:00Z'),
   });
   await assert.rejects(() => scheduler.run(), /temporary/);
   await scheduler.run();
   assert.equal(requestSends, 1);
   assert.equal(announcementSends, 2);
-  assert.equal(meta.has('last_close'), true);
+  assert.equal(meta.has('last_close:guild-a'), true);
+});
+
+test('스케줄러는 길드별로 설정된 공지 채널을 사용한다', async () => {
+  const meta = new Map();
+  const sends = [];
+  const database = {
+    meta: (key) => meta.get(key) ?? null,
+    setMeta: (key, value) => meta.set(key, value),
+    daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
+    setting: () => ({ locked: 0, exclusive_user_id: null }),
+    guildChannels: (guildId) => ({
+      request_channel_id: `${guildId}-request`, announcement_channel_id: `${guildId}-announcement`,
+    }),
+  };
+  const scheduler = new Scheduler({
+    client: { channels: { fetch: async (id) => ({ isTextBased: () => true, send: async () => sends.push(id) }) } },
+    database,
+    guildIds: ['guild-a', 'guild-b'],
+    now: () => new Date('2026-07-13T14:40:00Z'),
+  });
+  await scheduler.run();
+
+  assert.deepEqual(sends, [
+    'guild-a-request', 'guild-a-announcement', 'guild-b-request', 'guild-b-announcement',
+  ]);
 });
 
 test('검색 서버는 Tailscale IPv4만 외부 바인딩으로 허용한다', () => {

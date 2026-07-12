@@ -18,7 +18,13 @@ const playlist = new PlaylistService(database);
 const search = new SearchClient(process.env.SEARCH_API_URL, process.env.SEARCH_API_TOKEN);
 const guildIds = parseGuildIds(process.env.DISCORD_GUILD_IDS);
 if (!guildIds.length) throw new Error('DISCORD_GUILD_IDS is required');
-const handler = new CommandHandler({ database, playlist, search, guildIds });
+const fallbackChannels = process.env.SONG_REQUEST_CHANNEL_ID?.trim() && process.env.SONG_ANNOUNCEMENT_CHANNEL_ID?.trim()
+  ? {
+      request_channel_id: process.env.SONG_REQUEST_CHANNEL_ID.trim(),
+      announcement_channel_id: process.env.SONG_ANNOUNCEMENT_CHANNEL_ID.trim(),
+    }
+  : null;
+const handler = new CommandHandler({ database, playlist, search, guildIds, fallbackChannels });
 client.commands = new Collection(commandData().map((command) => [command.name, command]));
 
 client.once(Events.ClientReady, async (readyClient) => {
@@ -32,8 +38,8 @@ client.once(Events.ClientReady, async (readyClient) => {
   new Scheduler({
     client: readyClient,
     database,
-    requestChannelId: process.env.SONG_REQUEST_CHANNEL_ID?.trim() || null,
-    announcementChannelId: process.env.SONG_ANNOUNCEMENT_CHANNEL_ID?.trim() || null,
+    guildIds,
+    fallbackChannels,
   }).start();
   console.log(`Logged in as ${readyClient.user.tag}`);
 });

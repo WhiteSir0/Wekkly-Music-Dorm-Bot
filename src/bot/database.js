@@ -26,6 +26,11 @@ export class MusicDatabase {
         locked INTEGER NOT NULL DEFAULT 0,
         exclusive_user_id TEXT
       );
+      CREATE TABLE IF NOT EXISTS guild_settings (
+        guild_id TEXT PRIMARY KEY,
+        request_channel_id TEXT NOT NULL,
+        announcement_channel_id TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     const insertDay = this.db.prepare('INSERT OR IGNORE INTO day_settings(day) VALUES (?)');
@@ -67,6 +72,23 @@ export class MusicDatabase {
   setLock(day, locked, userId = null) {
     this.db.prepare('UPDATE day_settings SET locked=?, exclusive_user_id=? WHERE day=?').run(locked ? 1 : 0, userId, day);
     if (locked) this.db.prepare('DELETE FROM playlists WHERE day=?').run(day);
+  }
+
+  guildChannels(guildId) {
+    return this.db.prepare(`
+      SELECT guild_id, request_channel_id, announcement_channel_id
+      FROM guild_settings WHERE guild_id=?
+    `).get(guildId) ?? null;
+  }
+
+  setGuildChannels(guildId, requestChannelId, announcementChannelId) {
+    this.db.prepare(`
+      INSERT INTO guild_settings(guild_id, request_channel_id, announcement_channel_id)
+      VALUES (?, ?, ?)
+      ON CONFLICT(guild_id) DO UPDATE SET
+        request_channel_id=excluded.request_channel_id,
+        announcement_channel_id=excluded.announcement_channel_id
+    `).run(guildId, requestChannelId, announcementChannelId);
   }
 
   resetWeekly() {
