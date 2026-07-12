@@ -10,6 +10,7 @@ import { enrichMusicVideos, parseMusicItem, parseSearch } from '../src/search/re
 import { commandData } from '../src/bot/commands.js';
 import { parseGuildIds } from '../src/bot/config.js';
 import { registerCommands } from '../src/bot/registration.js';
+import { Scheduler } from '../src/bot/scheduler.js';
 
 test('general YouTube search parsing handles iterables, author objects, and length text', () => {
   const results = new Set([
@@ -120,4 +121,23 @@ test('한 길드 등록이 실패해도 나머지 길드를 등록한다', async
   });
   assert.equal(calls.length, 3);
   assert.deepEqual(failures.map(({ guildId }) => guildId), ['1263151654883295293']);
+});
+
+test('마감 공지를 보내지 못하면 완료 처리하지 않는다', async () => {
+  const meta = new Map();
+  const database = {
+    meta: (key) => meta.get(key) ?? null,
+    setMeta: (key, value) => meta.set(key, value),
+    daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
+    setting: () => ({ locked: 0, exclusive_user_id: null }),
+  };
+  const scheduler = new Scheduler({
+    client: { channels: { fetch: async () => null } },
+    database,
+    requestChannelId: null,
+    announcementChannelId: null,
+    now: () => new Date('2026-07-13T14:40:00Z'),
+  });
+  await scheduler.run();
+  assert.equal(meta.has('last_close'), false);
 });

@@ -44,13 +44,29 @@ export class Scheduler {
     const key = `${kstDate(this.now())}:${day}`;
     if (this.database.meta('last_close') === key) return;
     const songs = this.database.daySongs(day);
-    const channelId = this.database.setting(day).exclusive_user_id ? this.announcementChannelId : this.requestChannelId;
-    const channel = channelId ? await this.client.channels.fetch(channelId).catch(() => null) : null;
-    if (channel?.isTextBased()) await channel.send({ embeds: [listEmbed(day, songs, true)] });
-    if (this.announcementChannelId && this.announcementChannelId !== channelId) {
+    if (!songs.length) return;
+    const setting = this.database.setting(day);
+    const exclusiveUserId = setting.locked ? setting.exclusive_user_id : null;
+    let sent = false;
+    if (exclusiveUserId && this.announcementChannelId) {
+      const channel = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
+      if (channel?.isTextBased()) {
+        await channel.send({ content: `<@${exclusiveUserId}> 상점 플리입니다.`, embeds: [listEmbed(day, songs)] });
+        sent = true;
+      }
+    } else if (this.requestChannelId && this.announcementChannelId) {
+      const request = await this.client.channels.fetch(this.requestChannelId).catch(() => null);
       const announcement = await this.client.channels.fetch(this.announcementChannelId).catch(() => null);
-      if (announcement?.isTextBased()) await announcement.send({ embeds: [listEmbed(day, songs, true)] });
+      if (request?.isTextBased() && announcement?.isTextBased()) {
+        const payload = { embeds: [listEmbed(day, songs, true)] };
+        const message = await request.send(payload);
+        if (this.requestChannelId !== this.announcementChannelId) {
+          if (typeof message.forward === 'function') await message.forward(announcement);
+          else await announcement.send(payload);
+        }
+        sent = true;
+      }
     }
-    this.database.setMeta('last_close', key);
+    if (sent) this.database.setMeta('last_close', key);
   }
 }

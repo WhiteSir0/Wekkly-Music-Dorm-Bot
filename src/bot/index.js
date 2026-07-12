@@ -24,7 +24,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   const body = commandData().map((command) => command.toJSON());
   const failures = await registerCommands({ rest, clientId: process.env.DISCORD_CLIENT_ID, guildIds, body });
   for (const failure of failures) {
-    console.error(`Guild command registration failed: ${failure.guildId}`, failure.error);
+    console.warn('길드 명령어 등록 건너뜀', { guildId: failure.guildId, code: failure.error?.code ?? 'unknown' });
   }
   readyClient.user.setPresence({ activities: [{ name: '/도움말', type: ActivityType.Listening }], status: 'online' });
   new Scheduler({
