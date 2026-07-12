@@ -12,7 +12,7 @@
 
 ```bash
 cp .env.search.example .env.search
-docker compose -f compose.search.yml up -d --build
+docker compose --env-file .env.search -f compose.search.yml up -d --build
 ```
 
 `.env.search`의 `SEARCH_API_TOKEN`을 임의의 긴 값으로 설정합니다. `4310/tcp`는 인터넷에 공개하지 않고 Tailscale 인터페이스에서만 허용합니다.
