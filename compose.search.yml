@@ -1,0 +1,10 @@
+services:
+  music-search:
+    build:
+      context: .
+      dockerfile: Dockerfile.search
+    container_name: wekkly-music-search
+    restart: unless-stopped
+    env_file: .env.search
+    ports:
+      - "4310:4310"

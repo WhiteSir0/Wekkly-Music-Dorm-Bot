@@ -1,0 +1,10 @@
+Wekkly-Music-Dorm-Bot
+
+This project is based on YouTube-Music-Weekly-Scheduler-Bot:
+https://github.com/koori0831/YouTube-Music-Weekly-Scheduler-Bot
+
+Copyright (c) 2026 koori
+Licensed under the MIT License. See LICENSE for the full license text.
+
+Wekkly-Music-Dorm-Bot includes modifications such as a Node.js rewrite and a
+split deployment architecture for the Discord bot and YouTube Music search API.
