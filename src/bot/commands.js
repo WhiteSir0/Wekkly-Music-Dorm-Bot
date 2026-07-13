@@ -15,7 +15,7 @@ import { renderGuideCanvas } from './canvas.js';
 import { deleteStoredStatusMessages, ensureWeeklyStatus, songDetailPayload, weekKey } from './playlistStatus.js';
 import { handleDelete, handleLock, handleReset, handleShuffle } from './adminCommands.js';
 import { handleHistory, handleHistoryAutocomplete, handleHistoryDay, handleHistorySong, handleView } from './playlistViews.js';
-import { showReportModal, submitReport } from './playlistReports.js';
+import { resolveReport, showReportModal, showResolutionModal, submitReport } from './playlistReports.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
@@ -37,6 +37,8 @@ export function commandData() {
       .addChannelOption((option) => option.setName('신청채널').setDescription('노래 신청 명령을 사용할 채널')
         .setRequired(true).addChannelTypes(ChannelType.GuildText))
       .addChannelOption((option) => option.setName('공지채널').setDescription('마감 플레이리스트를 공지할 채널')
+        .setRequired(true).addChannelTypes(ChannelType.GuildText))
+      .addChannelOption((option) => option.setName('신고채널').setDescription('신청곡 신고를 받을 채널')
         .setRequired(true).addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('플리제한').setDescription('요일 플레이리스트를 잠금 또는 해제합니다.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -127,11 +129,12 @@ export class CommandHandler {
     }
     const requestChannel = interaction.options.getChannel('신청채널');
     const announcementChannel = interaction.options.getChannel('공지채널');
+    const reportChannel = interaction.options.getChannel('신고채널');
     const previous = this.database.guildChannels(interaction.guildId);
     if (previous && previous.request_channel_id !== requestChannel.id) {
       await deleteStoredStatusMessages(interaction.client, previous);
     }
-    this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id);
+    this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id, reportChannel.id);
     const payload = { files: [{ attachment: await renderGuideCanvas(), name: 'miku-guide.png' }] };
     let guideMessageId = previous?.guide_message_id ?? null;
     if (guideMessageId && previous.request_channel_id === requestChannel.id) {
@@ -151,7 +154,7 @@ export class CommandHandler {
       key: weekKey(new Date(Date.now() + 9 * 60 * 60_000)), forceEdit: true,
     });
     await interaction.reply({
-      content: `신청 채널을 ${requestChannel}, 공지 채널을 ${announcementChannel}(으)로 설정했습니다.`,
+      content: `신청 ${requestChannel} · 공지 ${announcementChannel} · 신고 ${reportChannel}`,
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -230,6 +233,15 @@ export class CommandHandler {
 
   async reportSubmit(interaction) {
     await submitReport(this.database, interaction);
+  }
+
+  async reportAction(interaction) {
+    await showResolutionModal(interaction);
+  }
+
+  async reportResolution(interaction) {
+    const day = await resolveReport(this.database, interaction);
+    if (day) await this.refresh(interaction, day);
   }
 
   async lock(interaction) {

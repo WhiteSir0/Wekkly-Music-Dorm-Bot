@@ -31,6 +31,7 @@ export class MusicDatabase {
         guild_id TEXT PRIMARY KEY,
         request_channel_id TEXT NOT NULL,
         announcement_channel_id TEXT NOT NULL,
+        report_channel_id TEXT,
         guide_message_id TEXT,
         weekly_message_id TEXT,
         weekly_message_key TEXT
@@ -66,6 +67,9 @@ export class MusicDatabase {
     }
     if (!guildColumns.some(({ name }) => name === 'day_message_ids')) {
       this.db.exec("ALTER TABLE guild_settings ADD COLUMN day_message_ids TEXT NOT NULL DEFAULT '{}'");
+    }
+    if (!guildColumns.some(({ name }) => name === 'report_channel_id')) {
+      this.db.exec('ALTER TABLE guild_settings ADD COLUMN report_channel_id TEXT');
     }
     const insertDay = this.db.prepare('INSERT OR IGNORE INTO day_settings(day) VALUES (?)');
     for (const day of DAYS) insertDay.run(day);
@@ -148,6 +152,13 @@ export class MusicDatabase {
     return song;
   }
 
+  deleteSongById(id) {
+    const song = this.song(id);
+    if (!song) return null;
+    this.db.prepare('DELETE FROM playlists WHERE id=?').run(id);
+    return song;
+  }
+
   setLock(day, locked, userId = null) {
     this.db.prepare('UPDATE day_settings SET locked=?, exclusive_user_id=? WHERE day=?').run(locked ? 1 : 0, userId, day);
     if (!locked) return 0;
@@ -157,19 +168,20 @@ export class MusicDatabase {
   guildChannels(guildId) {
     return this.db.prepare(`
       SELECT guild_id, request_channel_id, announcement_channel_id, guide_message_id,
-             weekly_message_id, weekly_message_key, day_message_ids
+             weekly_message_id, weekly_message_key, day_message_ids, report_channel_id
       FROM guild_settings WHERE guild_id=?
     `).get(guildId) ?? null;
   }
 
-  setGuildChannels(guildId, requestChannelId, announcementChannelId) {
+  setGuildChannels(guildId, requestChannelId, announcementChannelId, reportChannelId = announcementChannelId) {
     this.db.prepare(`
-      INSERT INTO guild_settings(guild_id, request_channel_id, announcement_channel_id)
-      VALUES (?, ?, ?)
+      INSERT INTO guild_settings(guild_id, request_channel_id, announcement_channel_id, report_channel_id)
+      VALUES (?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         request_channel_id=excluded.request_channel_id,
-        announcement_channel_id=excluded.announcement_channel_id
-    `).run(guildId, requestChannelId, announcementChannelId);
+        announcement_channel_id=excluded.announcement_channel_id,
+        report_channel_id=excluded.report_channel_id
+    `).run(guildId, requestChannelId, announcementChannelId, reportChannelId);
   }
 
   setGuildGuideMessage(guildId, messageId) {

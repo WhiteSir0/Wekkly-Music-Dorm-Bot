@@ -78,10 +78,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton() && interaction.customId.startsWith('song:')) await handler.button(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('history:day:')) await handler.historyDay(interaction);
+    else if (interaction.isButton() && interaction.customId.startsWith('report:')) await handler.reportAction(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('playlist:report:')) await handler.reportButton(interaction);
     else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('history:song:')) await handler.historySong(interaction);
     else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('playlist:song:')) await handler.playlistSong(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('playlist:report:')) await handler.reportSubmit(interaction);
+    else if (interaction.isModalSubmit() && interaction.customId.startsWith('report:resolve:')) await handler.reportResolution(interaction);
     else if (interaction.isAutocomplete()) await handler.autocomplete(interaction);
     else if (interaction.isChatInputCommand()) await handler.execute(interaction);
   } catch (error) {

@@ -1,4 +1,14 @@
-import { ActionRowBuilder, EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  MessageFlags,
+  ModalBuilder,
+  PermissionFlagsBits,
+  TextInputBuilder,
+  TextInputStyle,
+} from 'discord.js';
 import { songLabel } from './playlistService.js';
 
 export async function showReportModal(interaction) {
@@ -17,7 +27,7 @@ export async function submitReport(database, interaction) {
     await interaction.reply({ content: '신고할 곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
     return;
   }
-  const channel = await interaction.client.channels.fetch(channels.announcement_channel_id).catch(() => null);
+  const channel = await interaction.client.channels.fetch(channels.report_channel_id ?? channels.announcement_channel_id).catch(() => null);
   if (!channel?.isTextBased()) {
     await interaction.reply({ content: '신고 채널을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
     return;
@@ -29,6 +39,63 @@ export async function submitReport(database, interaction) {
       { name: '신고자', value: `<@${interaction.user.id}>`, inline: true },
       { name: '사유', value: interaction.fields.getTextInputValue('reason') },
     );
-  await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`report:delete:${song.id}`).setLabel('삭제 처리').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`report:reject:${song.id}`).setLabel('기각').setStyle(ButtonStyle.Secondary),
+  );
+  await channel.send({ embeds: [embed], components: [row], allowedMentions: { parse: [] } });
   await interaction.reply({ content: '신고했습니다.', flags: MessageFlags.Ephemeral });
+}
+
+function isAdmin(interaction) {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
+    || interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+}
+
+export async function showResolutionModal(interaction) {
+  if (!isAdmin(interaction)) {
+    await interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const [, action, songId] = interaction.customId.split(':');
+  const label = action === 'delete' ? '삭제 사유' : '기각 사유';
+  const modal = new ModalBuilder()
+    .setCustomId(`report:resolve:${action}:${songId}:${interaction.message.id}`)
+    .setTitle(label);
+  const reason = new TextInputBuilder().setCustomId('reason').setLabel(label).setStyle(TextInputStyle.Paragraph)
+    .setRequired(true).setMaxLength(500);
+  modal.addComponents(new ActionRowBuilder().addComponents(reason));
+  await interaction.showModal(modal);
+}
+
+export async function resolveReport(database, interaction) {
+  if (!isAdmin(interaction)) {
+    await interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
+    return null;
+  }
+  const [, , action, songId, messageId] = interaction.customId.split(':');
+  if (database.meta(`report:${messageId}`)) {
+    await interaction.reply({ content: '이미 처리된 신고입니다.', flags: MessageFlags.Ephemeral });
+    return null;
+  }
+  const song = database.song(Number(songId));
+  const message = await interaction.channel?.messages.fetch(messageId).catch(() => null);
+  if (!song || !message?.embeds?.[0]) {
+    await interaction.reply({ content: '신고 또는 신청곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
+    return null;
+  }
+  const reason = interaction.fields.getTextInputValue('reason');
+  const deleted = action === 'delete' ? database.deleteSongById(song.id) : null;
+  const result = action === 'delete' ? '삭제 처리' : '기각';
+  const reasonLabel = action === 'delete' ? '삭제 사유' : '기각 사유';
+  const embed = EmbedBuilder.from(message.embeds[0]).setColor(action === 'delete' ? 0xed4245 : 0x747f8d)
+    .addFields(
+      { name: '처리 결과', value: result, inline: true },
+      { name: '처리', value: `<@${interaction.user.id}>`, inline: true },
+      { name: reasonLabel, value: reason },
+    );
+  await message.edit({ embeds: [embed], components: [], allowedMentions: { parse: [] } });
+  database.setMeta(`report:${messageId}`, action);
+  await interaction.reply({ content: `${result}했습니다.`, flags: MessageFlags.Ephemeral });
+  return deleted?.day ?? null;
 }
