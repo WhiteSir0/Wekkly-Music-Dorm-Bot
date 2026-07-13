@@ -20,7 +20,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const database = new MusicDatabase(process.env.DB_PATH ?? '/app/data/music.db');
 const playlist = new PlaylistService(database);
 const search = new SearchClient(process.env.SEARCH_API_URL, process.env.SEARCH_API_TOKEN);
-const registeredUsers = new RegisteredUsers(process.env.DORM_DATABASE_PATH ?? '/app/dorm-database');
+const registeredUsers = new RegisteredUsers(process.env.DORM_DATABASE_PATH ?? '/app/dorm-users');
 const guildIds = parseGuildIds(process.env.DISCORD_GUILD_IDS);
 if (!guildIds.length) throw new Error('DISCORD_GUILD_IDS is required');
 const fallbackChannels = process.env.SONG_REQUEST_CHANNEL_ID?.trim() && process.env.SONG_ANNOUNCEMENT_CHANNEL_ID?.trim()
@@ -52,11 +52,6 @@ client.once(Events.ClientReady, async (readyClient) => {
   setInterval(updatePresence, 3 * 60_000);
   for (const song of database.songsWithoutUserName()) {
     for (const guildId of guildIds) {
-      const registeredName = await registeredUsers.name(guildId, song.user_id);
-      if (registeredName) {
-        database.setSongUserName(song.id, registeredName);
-        break;
-      }
       const guild = await readyClient.guilds.fetch(guildId).catch(() => null);
       const member = await guild?.members.fetch(song.user_id).catch(() => null);
       if (member) {

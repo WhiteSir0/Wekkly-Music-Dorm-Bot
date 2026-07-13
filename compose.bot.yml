@@ -8,4 +8,4 @@ services:
     env_file: .env.bot
     volumes:
       - ./data:/app/data
-      - ../discord-dorm-bot/database:/app/dorm-database:ro
+      - ../discord-dorm-bot/database/requester-names:/app/dorm-users:ro

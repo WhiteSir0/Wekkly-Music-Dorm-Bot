@@ -12,10 +12,11 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
-import { DAYS, MAX_SONGS } from '../shared/constants.js';
+import { DAYS } from '../shared/constants.js';
 import { songLabel } from './playlistService.js';
-import { createLockCard, renderGuideCanvas, renderLockCanvas } from './canvas.js';
+import { renderGuideCanvas } from './canvas.js';
 import { dayStatusPayload, ensureWeeklyStatus, songDetailPayload, weekKey, weeklyStatusPayload } from './playlistStatus.js';
+import { handleDelete, handleLock, handleReset, handleShuffle } from './adminCommands.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
@@ -51,20 +52,6 @@ export function commandData() {
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addStringOption((option) => option.setName('확인').setDescription('초기화 입력').setRequired(true)),
   ];
-}
-
-function isAdmin(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
-    || interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
-}
-
-function listEmbed(day, songs, shuffled = false) {
-  const ordered = shuffled ? [...songs].sort(() => Math.random() - 0.5) : songs;
-  const description = ordered.length
-    ? ordered.map((song, index) => `${index + 1}. [${songLabel(song)}](${song.url})`).join('\n')
-    : '신청된 곡이 없습니다.';
-  return new EmbedBuilder().setColor(0xd95377).setTitle(`${day}요일 플레이리스트`).setDescription(description)
-    .setFooter({ text: `${songs.length}/${MAX_SONGS[day]}곡` });
 }
 
 export class CommandHandler {
@@ -258,49 +245,20 @@ export class CommandHandler {
   }
 
   async lock(interaction) {
-    if (!isAdmin(interaction)) return interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
-    const day = interaction.options.getString('요일');
-    const locked = interaction.options.getString('상태') === '잠금';
-    const user = interaction.options.getUser('유저');
-    const deletedCount = this.database.setLock(day, locked, locked ? user?.id ?? null : null);
-    if (!locked) {
-      await interaction.reply(`${day}요일 플레이리스트를 열었습니다.`);
-      return;
-    }
-    const member = user ? interaction.options.getMember('유저') : null;
-    const displayName = member?.displayName ?? user?.globalName ?? user?.username;
-    const avatarUrl = user?.displayAvatarURL({ extension: 'png', size: 256 });
-    const attachment = await renderLockCanvas(createLockCard({ day, displayName, avatarUrl, deletedCount }));
-    const payload = { files: [{ attachment, name: 'miku-lock.png' }] };
-    if (user) {
-      payload.content = `<@${user.id}>`;
-      payload.allowedMentions = { users: [user.id] };
-    }
-    await interaction.reply(payload);
+    await handleLock(this.database, interaction);
   }
 
   async shuffle(interaction) {
-    if (!isAdmin(interaction)) return interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
-    const day = interaction.options.getString('요일');
-    await interaction.reply({ embeds: [listEmbed(day, this.database.daySongs(day), true)] });
+    await handleShuffle(this.database, interaction);
   }
 
   async delete(interaction) {
-    if (!isAdmin(interaction)) return interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
-    const day = interaction.options.getString('요일');
-    const song = this.database.deleteSong(day, interaction.options.getInteger('번호'));
-    await interaction.reply(song ? `${songLabel(song)}을 삭제했습니다.` : '해당 번호의 곡이 없습니다.');
+    await handleDelete(this.database, interaction);
   }
 
   async reset(interaction) {
-    if (!isAdmin(interaction)) return interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
-    if (interaction.options.getString('확인') !== '초기화') {
-      await interaction.reply({ content: '확인에 `초기화`를 입력해주세요.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    this.database.clearAll();
-    await interaction.reply('모든 신청 데이터를 초기화했습니다.');
+    await handleReset(this.database, interaction);
   }
 }
 
-export { listEmbed };
+export { listEmbed } from './adminCommands.js';
