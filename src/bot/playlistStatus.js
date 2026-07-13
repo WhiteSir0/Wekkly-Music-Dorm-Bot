@@ -29,15 +29,44 @@ export function dayStatusPayload(database, day, key = null) {
   return payload;
 }
 
-export function songDetailPayload(song) {
+export function historyOverviewPayload(key) {
+  return {
+    content: `**${weekLabel(key)} 플리**`,
+    components: [new ActionRowBuilder().addComponents(DAYS.map((day) => new ButtonBuilder()
+      .setCustomId(`history:day:${key}:${day}`).setLabel(day).setStyle(ButtonStyle.Primary)))],
+  };
+}
+
+export function historyDayStatusPayload(database, key, day) {
+  const songs = database.historyDaySongs(key, day);
+  const payload = {
+    content: '',
+    files: [{ attachment: renderDayPlaylistCanvas(day, songs, weekLabel(key)), name: `${day}-playlist.png` }],
+    components: [],
+  };
+  if (songs.length) {
+    const menu = new StringSelectMenuBuilder().setCustomId(`history:song:${key}:${day}`).setPlaceholder('곡 선택')
+      .addOptions(songs.map((song, index) => ({
+        label: `${index + 1}. ${song.title}`.slice(0, 100),
+        description: `${song.artist || '가수 정보 없음'} · ${song.user_name || `사용자 ${String(song.user_id).slice(-6)}`}`.slice(0, 100),
+        value: song.video_id,
+      })));
+    payload.components.push(new ActionRowBuilder().addComponents(menu));
+  }
+  return payload;
+}
+
+export function songDetailPayload(song, reportable = true) {
   const embed = new EmbedBuilder().setColor(0x85dce0).setTitle(song.title).setURL(song.url)
-    .addFields({ name: '가수', value: song.artist || '정보 없음', inline: true }, { name: '신청자', value: `<@${song.user_id}>`, inline: true });
+    .addFields(
+      { name: '가수', value: song.artist || '정보 없음', inline: true },
+      { name: '신청자', value: song.user_name || `<@${song.user_id}>`, inline: true },
+    );
+  const buttons = [new ButtonBuilder().setLabel('보기').setURL(song.url).setStyle(ButtonStyle.Link)];
+  if (reportable) buttons.push(new ButtonBuilder().setCustomId(`playlist:report:${song.id}`).setLabel('신고하기').setStyle(ButtonStyle.Danger));
   return {
     embeds: [embed], files: [], attachments: [],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setLabel('보기').setURL(song.url).setStyle(ButtonStyle.Link),
-      new ButtonBuilder().setCustomId(`playlist:report:${song.id}`).setLabel('신고하기').setStyle(ButtonStyle.Danger),
-    )],
+    components: [new ActionRowBuilder().addComponents(buttons)],
     allowedMentions: { parse: [] },
   };
 }
@@ -66,4 +95,17 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
   await legacyMessage?.delete().catch(() => null);
   database.setGuildDayMessages(guildId, messageIds, key);
   return messageIds;
+}
+
+export async function deleteStoredStatusMessages(client, settings) {
+  if (!settings?.request_channel_id) return;
+  const channel = await client.channels.fetch(settings.request_channel_id).catch(() => null);
+  if (!channel?.isTextBased()) return;
+  let dayMessageIds = {};
+  try { dayMessageIds = JSON.parse(settings.day_message_ids || '{}'); } catch { dayMessageIds = {}; }
+  const ids = new Set([settings.weekly_message_id, ...Object.values(dayMessageIds)].filter(Boolean));
+  for (const id of ids) {
+    const message = await channel.messages?.fetch(id).catch(() => null);
+    await message?.delete().catch(() => null);
+  }
 }

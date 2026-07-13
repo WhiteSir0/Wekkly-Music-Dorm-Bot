@@ -52,7 +52,7 @@ test('exclusive lock command sends the user mention with the canvas', async () =
   const replies = [];
   const followUps = [];
   const handler = new CommandHandler({
-    database: { setLock: () => 4 }, playlist: {}, search: {}, guildIds: ['guild-a'],
+    database: { setLock: () => 4, guildChannels: () => null }, playlist: {}, search: {}, guildIds: ['guild-a'],
   });
   const avatarCalls = [];
   const user = {
@@ -87,7 +87,7 @@ test('general lock command sends a card without a mention', async () => {
   const replies = [];
   const followUps = [];
   const handler = new CommandHandler({
-    database: { setLock: () => 5 }, playlist: {}, search: {}, guildIds: ['guild-a'],
+    database: { setLock: () => 5, guildChannels: () => null }, playlist: {}, search: {}, guildIds: ['guild-a'],
   });
 
   await handler.execute({
@@ -110,7 +110,7 @@ test('general lock command sends a card without a mention', async () => {
 test('unlock command remains a text response', async () => {
   const replies = [];
   const handler = new CommandHandler({
-    database: { setLock: () => 0 }, playlist: {}, search: {}, guildIds: ['guild-a'],
+    database: { setLock: () => 0, guildChannels: () => null }, playlist: {}, search: {}, guildIds: ['guild-a'],
   });
 
   await handler.execute({

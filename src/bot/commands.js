@@ -6,18 +6,16 @@ import {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
-  ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
-  TextInputBuilder,
-  TextInputStyle,
 } from 'discord.js';
 import { DAYS } from '../shared/constants.js';
 import { songLabel } from './playlistService.js';
 import { renderGuideCanvas } from './canvas.js';
-import { ensureWeeklyStatus, songDetailPayload, weekKey } from './playlistStatus.js';
+import { deleteStoredStatusMessages, ensureWeeklyStatus, songDetailPayload, weekKey } from './playlistStatus.js';
 import { handleDelete, handleLock, handleReset, handleShuffle } from './adminCommands.js';
-import { handleHistory, handleHistoryAutocomplete, handleView } from './playlistViews.js';
+import { handleHistory, handleHistoryAutocomplete, handleHistoryDay, handleHistorySong, handleView } from './playlistViews.js';
+import { showReportModal, submitReport } from './playlistReports.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
@@ -32,8 +30,8 @@ export function commandData() {
     dayOption(new SlashCommandBuilder().setName('신청').setDescription('요일 플레이리스트에 노래를 신청합니다.')
       .addStringOption((option) => option.setName('제목').setDescription('검색할 곡 제목').setRequired(true).setMaxLength(100))),
     dayOption(new SlashCommandBuilder().setName('보기').setDescription('이번 주 요일별 플레이리스트를 확인합니다.')),
-    dayOption(new SlashCommandBuilder().setName('지난플리').setDescription('저장된 주차별 플레이리스트를 확인합니다.')
-      .addStringOption((option) => option.setName('주차').setDescription('확인할 주차').setRequired(true).setAutocomplete(true))),
+    new SlashCommandBuilder().setName('지난플리').setDescription('저장된 주차별 플레이리스트를 확인합니다.')
+      .addStringOption((option) => option.setName('주차').setDescription('확인할 주차').setRequired(true).setAutocomplete(true)),
     new SlashCommandBuilder().setName('채널설정').setDescription('이 서버의 신청 및 공지 채널을 설정합니다.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((option) => option.setName('신청채널').setDescription('노래 신청 명령을 사용할 채널')
@@ -101,11 +99,7 @@ export class CommandHandler {
     const result = this.playlist.register(interaction.user.id, pending.day, song, userName);
     if (result.ok) this.pending.delete(token);
     await interaction.update({ content: result.ok ? `${songLabel(song)}을 ${pending.day}요일에 등록했습니다.` : result.message, embeds: [], components: [] });
-    if (result.ok) await ensureWeeklyStatus({
-      client: interaction.client, database: this.database, guildId: interaction.guildId,
-      key: weekKey(new Date(Date.now() + 9 * 60 * 60_000)), forceEdit: true,
-      day: pending.day,
-    }).catch((error) => console.error('[weekly status]', error));
+    if (result.ok) await this.refresh(interaction, pending.day);
   }
 
   async help(interaction) {
@@ -114,6 +108,7 @@ export class CommandHandler {
       .addFields(
         { name: '신청', value: '`/신청 제목 요일`\n검색 결과에서 곡을 선택하세요.' },
         { name: '보기', value: '`/보기 요일`' },
+        { name: '지난 플리', value: '`/지난플리 주차`' },
         { name: '기본 규칙', value: '월~목 12곡, 금요일 15곡\n한 사람당 주 2곡\n4분 30초 이하\n일요일 오전 9시 초기화' },
       );
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -133,6 +128,9 @@ export class CommandHandler {
     const requestChannel = interaction.options.getChannel('신청채널');
     const announcementChannel = interaction.options.getChannel('공지채널');
     const previous = this.database.guildChannels(interaction.guildId);
+    if (previous && previous.request_channel_id !== requestChannel.id) {
+      await deleteStoredStatusMessages(interaction.client, previous);
+    }
     this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id);
     const payload = { files: [{ attachment: await renderGuideCanvas(), name: 'miku-guide.png' }] };
     let guideMessageId = previous?.guide_message_id ?? null;
@@ -209,49 +207,34 @@ export class CommandHandler {
     await handleHistoryAutocomplete(this.database, interaction);
   }
 
+  async historyDay(interaction) {
+    await handleHistoryDay(this.database, interaction);
+  }
+
+  async historySong(interaction) {
+    await handleHistorySong(this.database, interaction);
+  }
+
   async playlistSong(interaction) {
     const song = this.database.song(Number(interaction.values[0]));
     if (!song) {
-      await interaction.update({ content: '삭제된 곡입니다.', embeds: [], components: [], attachments: [] });
+      await interaction.reply({ content: '삭제된 곡입니다.', flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.reply({ ...songDetailPayload(song), flags: MessageFlags.Ephemeral });
   }
 
   async reportButton(interaction) {
-    const songId = interaction.customId.split(':')[2];
-    const modal = new ModalBuilder().setCustomId(`playlist:report:${songId}`).setTitle('신청곡 신고');
-    const reason = new TextInputBuilder().setCustomId('reason').setLabel('사유').setStyle(TextInputStyle.Paragraph)
-      .setRequired(true).setMaxLength(500);
-    modal.addComponents(new ActionRowBuilder().addComponents(reason));
-    await interaction.showModal(modal);
+    await showReportModal(interaction);
   }
 
   async reportSubmit(interaction) {
-    const song = this.database.song(Number(interaction.customId.split(':')[2]));
-    const channels = this.database.guildChannels(interaction.guildId);
-    if (!song || !channels) {
-      await interaction.reply({ content: '신고할 곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    const channel = await interaction.client.channels.fetch(channels.announcement_channel_id).catch(() => null);
-    if (!channel?.isTextBased()) {
-      await interaction.reply({ content: '신고 채널을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    const embed = new EmbedBuilder().setColor(0xed4245).setTitle('신청곡 신고')
-      .addFields(
-        { name: '곡', value: `[${songLabel(song)}](${song.url})` },
-        { name: '신청자', value: `<@${song.user_id}>`, inline: true },
-        { name: '신고자', value: `<@${interaction.user.id}>`, inline: true },
-        { name: '사유', value: interaction.fields.getTextInputValue('reason') },
-      );
-    await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-    await interaction.reply({ content: '신고했습니다.', flags: MessageFlags.Ephemeral });
+    await submitReport(this.database, interaction);
   }
 
   async lock(interaction) {
-    await handleLock(this.database, interaction);
+    const day = await handleLock(this.database, interaction);
+    if (day) await this.refresh(interaction, day);
   }
 
   async shuffle(interaction) {
@@ -259,11 +242,21 @@ export class CommandHandler {
   }
 
   async delete(interaction) {
-    await handleDelete(this.database, interaction);
+    const day = await handleDelete(this.database, interaction);
+    if (day) await this.refresh(interaction, day);
   }
 
   async reset(interaction) {
-    await handleReset(this.database, interaction);
+    if (await handleReset(this.database, interaction)) await this.refresh(interaction);
+  }
+
+  async refresh(interaction, day = null) {
+    const key = weekKey(new Date(Date.now() + 9 * 60 * 60_000));
+    for (const guildId of this.guildIds) {
+      await ensureWeeklyStatus({
+        client: interaction.client, database: this.database, guildId, key, forceEdit: true, day,
+      }).catch((error) => console.error('[weekly status]', error));
+    }
   }
 }
 

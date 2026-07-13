@@ -87,6 +87,10 @@ export class MusicDatabase {
     return this.db.prepare('SELECT * FROM playlist_history WHERE week_key=? AND day=? ORDER BY position').all(key, day);
   }
 
+  historySong(key, videoId) {
+    return this.db.prepare('SELECT * FROM playlist_history WHERE week_key=? AND video_id=?').get(key, videoId) ?? null;
+  }
+
   historyWeeks() {
     return this.db.prepare('SELECT DISTINCT week_key FROM playlist_history ORDER BY week_key DESC').all()
       .map(({ week_key: key }) => key);
