@@ -28,8 +28,9 @@ export class Scheduler {
     if (current.getUTCDay() !== 0 || current.getUTCHours() < 9) return;
     const key = weekKey(current);
     if (this.database.meta('last_weekly_reset') === key) return;
-    const previousKey = this.database.meta('last_weekly_reset');
-    if (previousKey) this.database.archiveWeek(previousKey);
+    const previousKey = this.database.meta('last_weekly_reset')
+      ?? weekKey(new Date(current.getTime() - 7 * 24 * 60 * 60_000));
+    this.database.archiveWeek(previousKey);
     this.database.resetWeekly();
     this.database.setMeta('last_weekly_reset', key);
   }
