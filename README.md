@@ -36,7 +36,7 @@ docker compose -f compose.bot.yml up -d --build
 SEARCH_API_URL=http://100.x.x.x:4310
 ```
 
-봇을 서버에 추가한 뒤 관리자가 `/채널설정 신청채널 공지채널`을 실행합니다. 설정은 SQLite에 서버별로 저장되며, `/신청`은 지정된 신청 채널에서만 동작하고 마감 플레이리스트는 지정된 공지 채널로 전송됩니다. `SONG_REQUEST_CHANNEL_ID`와 `SONG_ANNOUNCEMENT_CHANNEL_ID`는 아직 설정하지 않은 서버를 위한 선택적 폴백입니다.
+봇을 서버에 추가한 뒤 관리자가 `/채널설정 신청채널 공지채널 신고채널`을 실행합니다. `/신청`은 신청 채널에서만 동작하고, 신고 채널에서는 관리자가 삭제 처리 또는 기각 사유를 남깁니다. `SONG_REQUEST_CHANNEL_ID`와 `SONG_ANNOUNCEMENT_CHANNEL_ID`는 아직 설정하지 않은 서버를 위한 선택적 폴백입니다.
 
 노래 신청자 이름은 같은 서버의 기숙사 봇 `/학번등록` 이름을 우선 사용합니다. 등록 정보가 없으면 Discord 서버 프로필 이름을 사용하며, 기숙사 봇이 분리해서 저장한 Discord ID와 이름만 미쿠봇 컨테이너에 읽기 전용으로 연결됩니다.
 
