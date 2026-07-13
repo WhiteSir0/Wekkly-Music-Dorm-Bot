@@ -231,6 +231,19 @@ export class MusicDatabase {
     this.db.prepare('INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
   }
 
+  claimMeta(key, value, staleBefore) {
+    return this.db.prepare(`
+      INSERT INTO meta(key,value) VALUES (?,?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value
+      WHERE meta.value LIKE 'processing:%'
+        AND CAST(substr(meta.value, 12, 13) AS INTEGER) < ?
+    `).run(key, value, staleBefore).changes === 1;
+  }
+
+  clearMeta(key, value) {
+    this.db.prepare('DELETE FROM meta WHERE key=? AND value=?').run(key, value);
+  }
+
   close() {
     this.db.close();
   }

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MusicDatabase } from '../src/bot/database.js';
 import { resolveReport, showResolutionModal, submitReport } from '../src/bot/playlistReports.js';
 
 const song = {
@@ -11,6 +15,21 @@ const song = {
   url: 'https://youtu.be/song-a',
   user_id: 'requester-a',
 };
+
+test('신고 처리 선점은 한 관리자에게만 허용하고 오래된 선점은 교체한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'music-report-'));
+  const database = new MusicDatabase(join(directory, 'music.db'));
+  try {
+    const now = Date.now();
+    assert.equal(database.claimMeta('report:a', `processing:${now}:delete:admin-a`, now - 300_000), true);
+    assert.equal(database.claimMeta('report:a', `processing:${now}:reject:admin-b`, now - 300_000), false);
+    database.setMeta('report:a', 'processing:0:delete:admin-a');
+    assert.equal(database.claimMeta('report:a', `processing:${now}:reject:admin-b`, now - 300_000), true);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('신고는 설정된 신고 채널에 삭제 처리와 기각 버튼으로 등록된다', async () => {
   const sends = [];
@@ -68,6 +87,8 @@ test('삭제 처리는 곡을 지우고 처리자와 삭제 사유를 신고 글
     deleteSongById: (id) => { deletedId = id; return song; },
     meta: (key) => meta.get(key) ?? null,
     setMeta: (key, value) => meta.set(key, value),
+    claimMeta: (key, value) => { meta.set(key, value); return true; },
+    clearMeta: (key, value) => { if (meta.get(key) === value) meta.delete(key); },
   };
   const day = await resolveReport(database, {
     customId: 'report:resolve:delete:7:message-a', user: { id: 'admin-a' },
@@ -94,6 +115,8 @@ test('기각은 곡을 유지하고 기각 사유만 남긴다', async () => {
     deleteSongById: () => assert.fail('기각할 때 곡을 삭제하면 안 됩니다.'),
     meta: () => null,
     setMeta: () => {},
+    claimMeta: () => true,
+    clearMeta: () => {},
   };
   const day = await resolveReport(database, {
     customId: 'report:resolve:reject:7:message-a', user: { id: 'admin-a' },
@@ -117,6 +140,8 @@ test('신고 글 수정이 실패하면 곡을 삭제하지 않는다', async ()
     deleteSongById: () => { deleted = true; return song; },
     meta: () => null,
     setMeta: () => assert.fail('실패한 처리를 완료로 저장하면 안 됩니다.'),
+    claimMeta: () => true,
+    clearMeta: () => {},
   };
   await assert.rejects(() => resolveReport(database, {
     customId: 'report:resolve:delete:7:message-a', user: { id: 'admin-a' },
@@ -130,4 +155,49 @@ test('신고 글 수정이 실패하면 곡을 삭제하지 않는다', async ()
   }), /temporary/);
 
   assert.equal(deleted, false);
+});
+
+test('같은 신고는 여러 관리자가 동시에 처리할 수 없다', async () => {
+  const meta = new Map();
+  const edits = [];
+  let releaseEdit;
+  const firstEdit = new Promise((resolve) => { releaseEdit = resolve; });
+  const database = {
+    song: () => song,
+    deleteSongById: () => song,
+    meta: (key) => meta.get(key) ?? null,
+    setMeta: (key, value) => meta.set(key, value),
+    claimMeta: (key, value) => {
+      if (meta.has(key)) return false;
+      meta.set(key, value);
+      return true;
+    },
+    clearMeta: (key, value) => {
+      if (meta.get(key) === value) meta.delete(key);
+    },
+  };
+  const message = {
+    embeds: [new EmbedBuilder().setTitle('신청곡 신고')],
+    edit: async (payload) => {
+      edits.push(payload);
+      if (edits.length === 1) await firstEdit;
+    },
+  };
+  const interaction = (action, userId) => ({
+    customId: `report:resolve:${action}:7:message-a`, user: { id: userId },
+    memberPermissions: { has: () => true },
+    fields: { getTextInputValue: () => '처리 사유' },
+    channel: { messages: { fetch: async () => message } },
+    reply: async () => {},
+  });
+
+  const deleting = resolveReport(database, interaction('delete', 'admin-a'));
+  await new Promise((resolve) => setImmediate(resolve));
+  const rejecting = resolveReport(database, interaction('reject', 'admin-b'));
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseEdit();
+  await Promise.all([deleting, rejecting]);
+
+  assert.equal(edits.length, 1);
+  assert.equal(meta.get('report:message-a'), 'delete');
 });
