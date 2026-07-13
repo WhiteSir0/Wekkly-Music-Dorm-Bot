@@ -394,4 +394,7 @@ test('검색 서버는 Tailscale IPv4만 외부 바인딩으로 허용한다', (
   assert.equal(isTailscaleIpv4('100.127.255.254'), true);
   assert.equal(isTailscaleIpv4('0.0.0.0'), false);
   assert.equal(isTailscaleIpv4('100.128.0.1'), false);
+  assert.equal(isTailscaleIpv4('100.64..1'), false);
+  assert.equal(isTailscaleIpv4('100.64.1e0.1'), false);
+  assert.equal(isTailscaleIpv4('100.64.+1.1'), false);
 });
