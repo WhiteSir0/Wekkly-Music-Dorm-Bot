@@ -68,12 +68,13 @@ function listEmbed(day, songs, shuffled = false) {
 }
 
 export class CommandHandler {
-  constructor({ database, playlist, search, guildIds, fallbackChannels = null }) {
+  constructor({ database, playlist, search, guildIds, fallbackChannels = null, userNames = async () => null }) {
     this.database = database;
     this.playlist = playlist;
     this.search = search;
     this.guildIds = new Set(guildIds);
     this.fallbackChannels = fallbackChannels;
+    this.userNames = userNames;
     this.pending = new Map();
   }
 
@@ -104,7 +105,8 @@ export class CommandHandler {
       return;
     }
     const song = pending.results[Number(indexText)];
-    const userName = interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
+    const registeredName = await this.userNames(interaction.guildId, interaction.user.id);
+    const userName = registeredName ?? interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
     const result = this.playlist.register(interaction.user.id, pending.day, song, userName);
     if (result.ok) this.pending.delete(token);
     await interaction.update({ content: result.ok ? `${songLabel(song)}을 ${pending.day}요일에 등록했습니다.` : result.message, embeds: [], components: [] });
