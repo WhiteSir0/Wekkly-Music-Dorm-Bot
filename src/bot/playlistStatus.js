@@ -76,7 +76,8 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
   if (!settings) return null;
   let messageIds = {};
   try { messageIds = JSON.parse(settings.day_message_ids || '{}'); } catch { messageIds = {}; }
-  if (!forceEdit && settings.weekly_message_key === key && DAYS.every((day) => messageIds[day])) return messageIds;
+  if (!forceEdit && !settings.weekly_message_id
+    && settings.weekly_message_key === key && DAYS.every((day) => messageIds[day])) return messageIds;
   const channel = await client.channels.fetch(settings.request_channel_id).catch(() => null);
   if (!channel?.isTextBased()) return null;
   const legacyMessage = settings.weekly_message_id
@@ -90,10 +91,14 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
     else {
       message = await channel.send(payload);
       messageIds[day] = message.id;
+      database.setGuildDayMessageIds(guildId, messageIds);
     }
   }
-  await legacyMessage?.delete().catch(() => null);
   database.setGuildDayMessages(guildId, messageIds, key);
+  if (legacyMessage) {
+    await legacyMessage.delete();
+    database.clearGuildWeeklyMessage(guildId);
+  }
   return messageIds;
 }
 

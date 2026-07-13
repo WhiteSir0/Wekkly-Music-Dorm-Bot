@@ -194,8 +194,17 @@ export class MusicDatabase {
   }
 
   setGuildDayMessages(guildId, messageIds, key) {
-    this.db.prepare('UPDATE guild_settings SET day_message_ids=?, weekly_message_key=?, weekly_message_id=NULL WHERE guild_id=?')
+    this.db.prepare('UPDATE guild_settings SET day_message_ids=?, weekly_message_key=? WHERE guild_id=?')
       .run(JSON.stringify(messageIds), key, guildId);
+  }
+
+  setGuildDayMessageIds(guildId, messageIds) {
+    this.db.prepare('UPDATE guild_settings SET day_message_ids=? WHERE guild_id=?')
+      .run(JSON.stringify(messageIds), guildId);
+  }
+
+  clearGuildWeeklyMessage(guildId) {
+    this.db.prepare('UPDATE guild_settings SET weekly_message_id=NULL WHERE guild_id=?').run(guildId);
   }
 
   resetWeekly() {

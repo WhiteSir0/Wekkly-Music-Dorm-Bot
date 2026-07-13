@@ -29,8 +29,11 @@ function base(width, height, title, subtitle) {
   return { canvas, context };
 }
 
-function shorten(value, size) {
-  return value.length > size ? `${value.slice(0, size - 1)}…` : value;
+function fitText(context, value, width) {
+  if (context.measureText(value).width <= width) return value;
+  const characters = [...value];
+  while (characters.length && context.measureText(`${characters.join('')}…`).width > width) characters.pop();
+  return `${characters.join('')}…`;
 }
 
 function requester(song) {
@@ -56,10 +59,10 @@ export function renderDayPlaylistCanvas(day, songs, label = '이번 주') {
     context.fillStyle = row % 2 ? '#f1efff' : '#e1f8f8';
     context.fillRect(x, y - 29, 590, 56);
     context.fillStyle = colors.ink;
-    context.fillText(`${index + 1}. ${shorten(song.title, 34)}`, x + 12, y - 3);
+    context.fillText(`${index + 1}. ${fitText(context, song.title, 520)}`, x + 12, y - 3);
     context.fillStyle = '#686170';
     context.font = `500 17px ${font}`;
-    context.fillText(`${shorten(song.artist || '가수 정보 없음', 28)} · 신청자 ${shorten(requester(song), 18)}`, x + 42, y + 20);
+    context.fillText(fitText(context, `${song.artist || '가수 정보 없음'} · 신청자 ${requester(song)}`, 530), x + 42, y + 20);
     context.font = `600 22px ${font}`;
   });
   return canvas.toBuffer('image/png');

@@ -70,6 +70,71 @@ test('월요일 신청 뒤에는 월요일 메시지만 수정한다', async () 
   }
 });
 
+test('요일 메시지 전송이 중간에 실패해도 성공한 메시지를 재사용한다', async () => {
+  const { directory, database } = openDatabase('wekkly-partial-messages-');
+  try {
+    database.setGuildChannels('guild-a', 'request-a', 'announcement-a');
+    const messages = new Map();
+    let attempts = 0;
+    let failOnce = true;
+    const channel = {
+      isTextBased: () => true,
+      messages: { fetch: async (id) => messages.get(id) ?? null },
+      send: async () => {
+        attempts += 1;
+        if (attempts === 3 && failOnce) {
+          failOnce = false;
+          throw new Error('temporary');
+        }
+        const id = `message-${messages.size + 1}`;
+        const message = { edit: async () => {} };
+        messages.set(id, message);
+        return { id };
+      },
+    };
+    const client = { channels: { fetch: async () => channel } };
+
+    await assert.rejects(() => ensureWeeklyStatus({ client, database, guildId: 'guild-a', key: '2026-07-12' }), /temporary/);
+    assert.equal(Object.keys(JSON.parse(database.guildChannels('guild-a').day_message_ids)).length, 2);
+    assert.equal(database.guildChannels('guild-a').weekly_message_key, null);
+
+    await ensureWeeklyStatus({ client, database, guildId: 'guild-a', key: '2026-07-12' });
+
+    assert.equal(messages.size, 5);
+    assert.equal(Object.keys(JSON.parse(database.guildChannels('guild-a').day_message_ids)).length, 5);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('기존 단일 메시지 삭제가 실패하면 ID를 남겨 다음 실행에 재시도한다', async () => {
+  const { directory, database } = openDatabase('wekkly-legacy-retry-');
+  try {
+    database.setGuildChannels('guild-a', 'request-a', 'announcement-a');
+    database.setGuildDayMessages('guild-a', { 월: 'm', 화: 't', 수: 'w', 목: 'h', 금: 'f' }, '2026-07-12');
+    database.setGuildWeeklyMessage('guild-a', 'legacy', '2026-07-12');
+    let deleteAttempts = 0;
+    const channel = {
+      isTextBased: () => true,
+      messages: { fetch: async (id) => id === 'legacy'
+        ? { delete: async () => { deleteAttempts += 1; if (deleteAttempts === 1) throw new Error('temporary'); } }
+        : { edit: async () => {} } },
+    };
+    const client = { channels: { fetch: async () => channel } };
+
+    await assert.rejects(() => ensureWeeklyStatus({ client, database, guildId: 'guild-a', key: '2026-07-12' }), /temporary/);
+    assert.equal(database.guildChannels('guild-a').weekly_message_id, 'legacy');
+    await ensureWeeklyStatus({ client, database, guildId: 'guild-a', key: '2026-07-12' });
+
+    assert.equal(deleteAttempts, 2);
+    assert.equal(database.guildChannels('guild-a').weekly_message_id, null);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('곡 선택은 요일 메시지를 바꾸지 않고 선택한 사용자에게만 보인다', async () => {
   const replies = [];
   const handler = new CommandHandler({
@@ -156,7 +221,7 @@ test('주차가 바뀌면 기존 곡을 보관하고 다섯 요일 메시지를 
     };
     const scheduler = new Scheduler({
       client: { channels: { fetch: async () => channel } }, database, guildIds: ['guild-a'],
-      now: () => new Date('2026-07-19T00:00:00Z'),
+      now: () => new Date('2026-07-20T03:00:00Z'),
     });
 
     await scheduler.run();

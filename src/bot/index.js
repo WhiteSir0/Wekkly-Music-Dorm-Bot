@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { ActivityType, Client, Collection, Events, GatewayIntentBits, REST } from 'discord.js';
+import { ActivityType, Client, Collection, Events, GatewayIntentBits, MessageFlags, REST } from 'discord.js';
 import { commandData, CommandHandler } from './commands.js';
 import { MusicDatabase } from './database.js';
 import { PlaylistService } from './playlistService.js';
@@ -76,6 +76,13 @@ client.once(Events.ClientReady, async (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (!guildIds.includes(interaction.guildId)) {
+      if (interaction.isAutocomplete()) await interaction.respond([]);
+      else if (interaction.isRepliable()) {
+        await interaction.reply({ content: '지정된 서버에서만 사용할 수 있습니다.', flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('song:')) await handler.button(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('history:day:')) await handler.historyDay(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('report:')) await handler.reportAction(interaction);

@@ -25,7 +25,7 @@ export class Scheduler {
   }
 
   async resetIfNeeded(current) {
-    if (current.getUTCDay() !== 0 || current.getUTCHours() < 9) return;
+    if (current.getUTCDay() === 6 || (current.getUTCDay() === 0 && current.getUTCHours() < 9)) return;
     const key = weekKey(current);
     if (this.database.meta('last_weekly_reset') === key) return;
     const previousKey = this.database.meta('last_weekly_reset')
