@@ -15,18 +15,19 @@ import { isTailscaleIpv4 } from '../src/search/config.js';
 import { GUIDE_COPY, renderGuideCanvas } from '../src/bot/canvas.js';
 import { DatabaseSync } from 'node:sqlite';
 
-test('general YouTube search parsing handles iterables, author objects, and length text', () => {
-  const results = new Set([
+test('YouTube Music 검색은 앨범이 있는 노래만 반환한다', () => {
+  const contents = new Set([
     {
-      video_id: 'video-1', title: { toString: () => 'General result' }, author: { name: 'Channel name' },
-      length_text: { text: '1:02:03' }, thumbnails: [{ url: 'https://img/one.jpg', width: 320 }],
+      item_type: 'song', id: 'song-1', title: 'Album song', artists: [{ name: 'Artist' }],
+      album: { id: 'MPR-album', name: 'Album' }, duration: { text: '3:12', seconds: 192 },
+      thumbnails: [{ url: 'https://img/one.jpg', width: 320 }],
     },
-    { video_id: 'video-1', title: 'Duplicate' },
-    { title: 'Not a video' },
+    { item_type: 'song', id: 'song-2', title: 'No album', artists: [{ name: 'Artist' }] },
+    { item_type: 'video', id: 'video-1', title: 'Music video', album: { id: 'MPR-video', name: 'Album' } },
   ]);
-  assert.deepEqual(parseSearch({ results }, 10), [{
-    videoId: 'video-1', title: 'General result', artist: 'Channel name',
-    url: 'https://www.youtube.com/watch?v=video-1', thumbnailUrl: 'https://img/one.jpg', durationSeconds: 3723,
+  assert.deepEqual(parseSearch({ contents: [{ contents }] }, 10), [{
+    videoId: 'song-1', title: 'Album song', artist: 'Artist',
+    url: 'https://www.youtube.com/watch?v=song-1', thumbnailUrl: 'https://img/one.jpg', durationSeconds: 192,
   }]);
 });
 
@@ -64,7 +65,8 @@ test('YouTube Data API enrichment is optional', async () => {
 
 test('YouTube Music 검색 결과를 봇 계약으로 변환한다', () => {
   const result = parseMusicItem({
-    id: 'abc123', title: { text: '테스트 곡' }, artists: [{ name: '重音テト' }],
+    item_type: 'song', id: 'abc123', title: { text: '테스트 곡' }, artists: [{ name: '重音テト' }],
+    album: { id: 'MPR-test', name: '테스트 앨범' },
     duration: { text: '3:21' }, thumbnail: { contents: [{ url: 'https://img/s.jpg', width: 120 }, { url: 'https://img/l.jpg', width: 480 }] },
   });
   assert.deepEqual(result, {
@@ -101,6 +103,7 @@ test('Discord 명령어 JSON이 모두 생성된다', () => {
   assert.deepEqual(commands.map(({ name }) => name), ['도움말', '정보', '신청', '보기', '채널설정', '플리제한', '셔플', '삭제', 'db초기화']);
   assert.equal(commands.find(({ name }) => name === '정보').default_member_permissions, undefined);
   assert.equal(commands.find(({ name }) => name === '채널설정').default_member_permissions, '8');
+  assert.equal(commands.find(({ name }) => name === '보기').options[0].required, false);
 });
 
 test('길드별 채널 설정을 SQLite에 영구 저장한다', () => {
@@ -115,6 +118,7 @@ test('길드별 채널 설정을 SQLite에 영구 저장한다', () => {
 
     assert.deepEqual({ ...database.guildChannels('guild-a') }, {
       guild_id: 'guild-a', request_channel_id: 'request-a', announcement_channel_id: 'announcement-a', guide_message_id: null,
+      weekly_message_id: null, weekly_message_key: null,
     });
     assert.equal(database.guildChannels('guild-b'), null);
   } finally {
@@ -182,26 +186,34 @@ test('안내 캔버스 문구는 자치회 용어를 사용한다', () => {
 
 test('채널 설정은 저장된 안내 메시지를 새로 만들지 않고 교체한다', async () => {
   const edits = [];
+  const weeklyEdits = [];
   const sends = [];
   let savedMessageId;
   const guideMessage = { edit: async (payload) => edits.push(payload) };
   const requestChannel = {
     id: 'request-a', toString: () => '<#request-a>',
-    messages: { fetch: async () => guideMessage },
+    isTextBased: () => true,
+    messages: { fetch: async (id) => id === 'guide-a' ? guideMessage : { edit: async (payload) => weeklyEdits.push(payload) } },
     send: async (payload) => { sends.push(payload); return { id: 'new-guide' }; },
   };
   const announcementChannel = { id: 'announcement-a', toString: () => '<#announcement-a>' };
   const handler = new CommandHandler({
     database: {
-      guildChannels: () => ({ request_channel_id: 'request-a', announcement_channel_id: 'announcement-a', guide_message_id: 'guide-a' }),
+      guildChannels: () => ({
+        request_channel_id: 'request-a', announcement_channel_id: 'announcement-a', guide_message_id: 'guide-a',
+        weekly_message_id: 'weekly-a', weekly_message_key: '2026-07-12',
+      }),
       setGuildChannels: () => {},
       setGuildGuideMessage: (_guildId, messageId) => { savedMessageId = messageId; },
+      setGuildWeeklyMessage: () => {},
+      daySongs: () => [],
     },
     playlist: {}, search: {}, guildIds: ['guild-a'],
   });
   await handler.execute({
     commandName: '채널설정', guildId: 'guild-a',
     memberPermissions: { has: () => true },
+    client: { channels: { fetch: async () => requestChannel } },
     options: { getChannel: (name) => name === '신청채널' ? requestChannel : announcementChannel },
     reply: async () => {},
   });
@@ -210,6 +222,7 @@ test('채널 설정은 저장된 안내 메시지를 새로 만들지 않고 교
   assert.equal(edits[0].files[0].name, 'miku-guide.png');
   assert.deepEqual(edits[0].attachments, []);
   assert.equal(sends.length, 0);
+  assert.equal(weeklyEdits.length, 1);
   assert.equal(savedMessageId, 'guide-a');
 });
 
@@ -322,6 +335,7 @@ test('스케줄러는 길드별로 설정된 공지 채널을 사용한다', asy
     setting: () => ({ locked: 0, exclusive_user_id: null }),
     guildChannels: (guildId) => ({
       request_channel_id: `${guildId}-request`, announcement_channel_id: `${guildId}-announcement`,
+      weekly_message_id: 'weekly', weekly_message_key: '2026-07-12',
     }),
   };
   const scheduler = new Scheduler({
@@ -335,6 +349,43 @@ test('스케줄러는 길드별로 설정된 공지 채널을 사용한다', asy
   assert.deepEqual(sends, [
     'guild-a-request', 'guild-a-announcement', 'guild-b-request', 'guild-b-announcement',
   ]);
+});
+
+test('봇이 늦게 시작해도 이번 주 현황 메시지를 한 번만 보낸다', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-status-'));
+  let database;
+  try {
+    database = new MusicDatabase(join(directory, 'music.db'));
+    database.setGuildChannels('guild-a', 'request-a', 'announcement-a');
+    const sends = [];
+    const channel = {
+      isTextBased: () => true,
+      messages: { fetch: async () => null },
+      send: async (payload) => {
+        sends.push(payload);
+        return { id: 'weekly-a' };
+      },
+    };
+    const scheduler = new Scheduler({
+      client: { channels: { fetch: async () => channel } },
+      database,
+      guildIds: ['guild-a'],
+      now: () => new Date('2026-07-13T03:00:00Z'),
+    });
+
+    await scheduler.run();
+    await scheduler.run();
+
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].files[0].name, 'weekly-playlist.png');
+    assert.deepEqual({ ...database.guildChannels('guild-a') }, {
+      guild_id: 'guild-a', request_channel_id: 'request-a', announcement_channel_id: 'announcement-a',
+      guide_message_id: null, weekly_message_id: 'weekly-a', weekly_message_key: '2026-07-12',
+    });
+  } finally {
+    database?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('검색 서버는 Tailscale IPv4만 외부 바인딩으로 허용한다', () => {

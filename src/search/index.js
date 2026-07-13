@@ -59,7 +59,7 @@ const server = createServer(async (request, response) => {
     }
     const input = bodySchema.parse(await readBody(request));
     const youtube = await youtubeClient();
-    const search = await youtube.search(input.query, { type: 'video' });
+    const search = await youtube.music.search(input.query, { type: 'song' });
     const apiKey = process.env.YOUTUBE_API_KEY?.trim();
     const candidates = parseSearch(search, apiKey ? 50 : input.limit);
     const results = await enrichMusicVideos(candidates, apiKey);

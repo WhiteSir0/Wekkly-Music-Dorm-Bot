@@ -1,11 +1,6 @@
 import { kstDate, kstNow } from '../shared/constants.js';
 import { listEmbed } from './commands.js';
-
-function sundayKey(current) {
-  const date = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
-  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
-  return date.toISOString().slice(0, 10);
-}
+import { ensureWeeklyStatus, weekKey } from './playlistStatus.js';
 
 export class Scheduler {
   constructor({ client, database, guildIds, fallbackChannels = null, now = () => new Date() }) {
@@ -25,15 +20,25 @@ export class Scheduler {
   async run() {
     const current = kstNow(this.now());
     await this.resetIfNeeded(current);
+    await this.ensureStatus(current);
     await this.closeIfNeeded(current);
   }
 
   async resetIfNeeded(current) {
     if (current.getUTCDay() !== 0 || current.getUTCHours() < 9) return;
-    const key = sundayKey(current);
+    const key = weekKey(current);
     if (this.database.meta('last_weekly_reset') === key) return;
     this.database.resetWeekly();
     this.database.setMeta('last_weekly_reset', key);
+  }
+
+  async ensureStatus(current) {
+    const day = current.getUTCDay();
+    if (day === 6 || (day === 0 && current.getUTCHours() < 9)) return;
+    const key = weekKey(current);
+    for (const guildId of this.guildIds) {
+      await ensureWeeklyStatus({ client: this.client, database: this.database, guildId, key });
+    }
   }
 
   async closeIfNeeded(current) {

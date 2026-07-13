@@ -6,17 +6,21 @@ import {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import { DAYS, MAX_SONGS } from '../shared/constants.js';
 import { songLabel } from './playlistService.js';
 import { createLockCard, renderGuideCanvas, renderLockCanvas } from './canvas.js';
+import { dayStatusPayload, ensureWeeklyStatus, songDetailPayload, weekKey, weeklyStatusPayload } from './playlistStatus.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
-function dayOption(builder) {
-  return builder.addStringOption((option) => option.setName('요일').setDescription('요일').setRequired(true).addChoices(...dayChoices));
+function dayOption(builder, required = true) {
+  return builder.addStringOption((option) => option.setName('요일').setDescription('요일').setRequired(required).addChoices(...dayChoices));
 }
 
 export function commandData() {
@@ -25,7 +29,7 @@ export function commandData() {
     new SlashCommandBuilder().setName('정보').setDescription('봇 정보와 원본 소스를 확인합니다.'),
     dayOption(new SlashCommandBuilder().setName('신청').setDescription('요일 플레이리스트에 노래를 신청합니다.')
       .addStringOption((option) => option.setName('제목').setDescription('검색할 곡 제목').setRequired(true).setMaxLength(100))),
-    dayOption(new SlashCommandBuilder().setName('보기').setDescription('요일 플레이리스트를 확인합니다.')),
+    dayOption(new SlashCommandBuilder().setName('보기').setDescription('이번 주 플레이리스트를 확인합니다.'), false),
     new SlashCommandBuilder().setName('채널설정').setDescription('이 서버의 신청 및 공지 채널을 설정합니다.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((option) => option.setName('신청채널').setDescription('노래 신청 명령을 사용할 채널')
@@ -100,9 +104,14 @@ export class CommandHandler {
       return;
     }
     const song = pending.results[Number(indexText)];
-    const result = this.playlist.register(interaction.user.id, pending.day, song);
+    const userName = interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
+    const result = this.playlist.register(interaction.user.id, pending.day, song, userName);
     if (result.ok) this.pending.delete(token);
     await interaction.update({ content: result.ok ? `${songLabel(song)}을 ${pending.day}요일에 등록했습니다.` : result.message, embeds: [], components: [] });
+    if (result.ok) await ensureWeeklyStatus({
+      client: interaction.client, database: this.database, guildId: interaction.guildId,
+      key: weekKey(new Date(Date.now() + 9 * 60 * 60_000)), forceEdit: true,
+    }).catch((error) => console.error('[weekly status]', error));
   }
 
   async help(interaction) {
@@ -145,6 +154,10 @@ export class CommandHandler {
     }
     if (!guideMessageId) guideMessageId = (await requestChannel.send(payload)).id;
     this.database.setGuildGuideMessage(interaction.guildId, guideMessageId);
+    await ensureWeeklyStatus({
+      client: interaction.client, database: this.database, guildId: interaction.guildId,
+      key: weekKey(new Date(Date.now() + 9 * 60 * 60_000)), forceEdit: true,
+    });
     await interaction.reply({
       content: `신청 채널을 ${requestChannel}, 공지 채널을 ${announcementChannel}(으)로 설정했습니다.`,
       flags: MessageFlags.Ephemeral,
@@ -192,7 +205,54 @@ export class CommandHandler {
 
   async view(interaction) {
     const day = interaction.options.getString('요일');
-    await interaction.reply({ embeds: [listEmbed(day, this.database.daySongs(day))], flags: MessageFlags.Ephemeral });
+    const payload = day ? dayStatusPayload(this.database, day) : weeklyStatusPayload(this.database);
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
+
+  async playlistDay(interaction) {
+    const day = interaction.customId.split(':')[2];
+    await interaction.reply({ ...dayStatusPayload(this.database, day), flags: MessageFlags.Ephemeral });
+  }
+
+  async playlistSong(interaction) {
+    const song = this.database.song(Number(interaction.values[0]));
+    if (!song) {
+      await interaction.update({ content: '삭제된 곡입니다.', embeds: [], components: [], attachments: [] });
+      return;
+    }
+    await interaction.update(songDetailPayload(song));
+  }
+
+  async reportButton(interaction) {
+    const songId = interaction.customId.split(':')[2];
+    const modal = new ModalBuilder().setCustomId(`playlist:report:${songId}`).setTitle('신청곡 신고');
+    const reason = new TextInputBuilder().setCustomId('reason').setLabel('사유').setStyle(TextInputStyle.Paragraph)
+      .setRequired(true).setMaxLength(500);
+    modal.addComponents(new ActionRowBuilder().addComponents(reason));
+    await interaction.showModal(modal);
+  }
+
+  async reportSubmit(interaction) {
+    const song = this.database.song(Number(interaction.customId.split(':')[2]));
+    const channels = this.database.guildChannels(interaction.guildId);
+    if (!song || !channels) {
+      await interaction.reply({ content: '신고할 곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const channel = await interaction.client.channels.fetch(channels.announcement_channel_id).catch(() => null);
+    if (!channel?.isTextBased()) {
+      await interaction.reply({ content: '신고 채널을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const embed = new EmbedBuilder().setColor(0xed4245).setTitle('신청곡 신고')
+      .addFields(
+        { name: '곡', value: `[${songLabel(song)}](${song.url})` },
+        { name: '신청자', value: `<@${song.user_id}>`, inline: true },
+        { name: '신고자', value: `<@${interaction.user.id}>`, inline: true },
+        { name: '사유', value: interaction.fields.getTextInputValue('reason') },
+      );
+    await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+    await interaction.reply({ content: '신고했습니다.', flags: MessageFlags.Ephemeral });
   }
 
   async lock(interaction) {
@@ -209,8 +269,12 @@ export class CommandHandler {
     const displayName = member?.displayName ?? user?.globalName ?? user?.username;
     const avatarUrl = user?.displayAvatarURL({ extension: 'png', size: 256 });
     const attachment = await renderLockCanvas(createLockCard({ day, displayName, avatarUrl, deletedCount }));
-    await interaction.reply({ files: [{ attachment, name: 'miku-lock.png' }] });
-    if (user) await interaction.followUp({ content: `<@${user.id}>`, allowedMentions: { users: [user.id] } });
+    const payload = { files: [{ attachment, name: 'miku-lock.png' }] };
+    if (user) {
+      payload.content = `<@${user.id}>`;
+      payload.allowedMentions = { users: [user.id] };
+    }
+    await interaction.reply(payload);
   }
 
   async shuffle(interaction) {

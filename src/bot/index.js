@@ -7,6 +7,9 @@ import { SearchClient } from './searchClient.js';
 import { Scheduler } from './scheduler.js';
 import { parseGuildIds } from './config.js';
 import { registerCommands } from './registration.js';
+import { ensureWeeklyStatus, weekKey } from './playlistStatus.js';
+import { kstNow } from '../shared/constants.js';
+import { MIKU_TRACKS } from '../shared/mikuTracks.js';
 
 const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID', 'DISCORD_GUILD_IDS', 'SEARCH_API_URL', 'SEARCH_API_TOKEN'];
 for (const name of required) if (!process.env[name]?.trim()) throw new Error(`${name} is required`);
@@ -34,7 +37,29 @@ client.once(Events.ClientReady, async (readyClient) => {
   for (const failure of failures) {
     console.warn('길드 명령어 등록 건너뜀', { guildId: failure.guildId, code: failure.error?.code ?? 'unknown' });
   }
-  readyClient.user.setPresence({ activities: [{ name: '/도움말', type: ActivityType.Listening }], status: 'online' });
+  let presenceIndex = Math.floor(Math.random() * MIKU_TRACKS.length);
+  const updatePresence = () => {
+    const [title, artist] = MIKU_TRACKS[presenceIndex % MIKU_TRACKS.length];
+    readyClient.user.setPresence({ activities: [{ name: `${title} - ${artist}`, type: ActivityType.Listening }], status: 'online' });
+    presenceIndex += 1;
+  };
+  updatePresence();
+  setInterval(updatePresence, 3 * 60_000);
+  for (const song of database.songsWithoutUserName()) {
+    for (const guildId of guildIds) {
+      const guild = await readyClient.guilds.fetch(guildId).catch(() => null);
+      const member = await guild?.members.fetch(song.user_id).catch(() => null);
+      if (member) {
+        database.setSongUserName(song.id, member.displayName);
+        break;
+      }
+    }
+  }
+  for (const guildId of guildIds) {
+    await ensureWeeklyStatus({
+      client: readyClient, database, guildId, key: weekKey(kstNow()), forceEdit: true,
+    }).catch((error) => console.error('[weekly status]', error));
+  }
   new Scheduler({
     client: readyClient,
     database,
@@ -47,6 +72,10 @@ client.once(Events.ClientReady, async (readyClient) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton() && interaction.customId.startsWith('song:')) await handler.button(interaction);
+    else if (interaction.isButton() && interaction.customId.startsWith('playlist:day:')) await handler.playlistDay(interaction);
+    else if (interaction.isButton() && interaction.customId.startsWith('playlist:report:')) await handler.reportButton(interaction);
+    else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('playlist:song:')) await handler.playlistSong(interaction);
+    else if (interaction.isModalSubmit() && interaction.customId.startsWith('playlist:report:')) await handler.reportSubmit(interaction);
     else if (interaction.isChatInputCommand()) await handler.execute(interaction);
   } catch (error) {
     console.error('[interaction]', error);

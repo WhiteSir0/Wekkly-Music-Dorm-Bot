@@ -23,6 +23,7 @@ function thumbnail(item) {
 }
 
 export function parseMusicItem(item) {
+  if (item?.item_type !== 'song' || !item?.album?.id || !item?.album?.name) return null;
   const id = item?.id ?? item?.video_id ?? item?.endpoint?.payload?.videoId ?? item?.endpoint?.payload?.video_id;
   if (!id) return null;
   const title = text(item?.title) ?? text(item?.name);
@@ -43,8 +44,7 @@ export function parseMusicItem(item) {
 }
 
 export function parseSearch(search, limit) {
-  const sources = [search?.results, search?.videos, search?.contents, search?.items].filter(Boolean);
-  const items = sources.flatMap(array);
+  const items = array(search?.contents).flatMap((shelf) => array(shelf?.contents ?? shelf?.items));
   const unique = new Map();
   for (const item of items) {
     const parsed = parseMusicItem(item);

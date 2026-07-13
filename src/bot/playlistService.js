@@ -17,12 +17,12 @@ export class PlaylistService {
     return { ok: true };
   }
 
-  register(userId, day, song) {
+  register(userId, day, song, userName = null) {
     const validation = this.validate(userId, day);
     if (!validation.ok) return validation;
     if (song.durationSeconds && song.durationSeconds > MAX_DURATION_SECONDS) return { ok: false, message: '곡이 너무 길어요. 4분 30초 이내의 곡만 신청 가능합니다.' };
     if (this.database.hasVideo(song.videoId)) return { ok: false, message: '이번 주에는 같은 곡을 한 번만 신청할 수 있습니다.' };
-    this.database.addSong({ ...song, day, userId });
+    this.database.addSong({ ...song, day, userId, userName });
     return { ok: true, songs: this.database.daySongs(day) };
   }
 }

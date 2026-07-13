@@ -17,6 +17,7 @@ export class MusicDatabase {
         artist TEXT,
         url TEXT NOT NULL,
         user_id TEXT NOT NULL,
+        user_name TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE UNIQUE INDEX IF NOT EXISTS playlists_video_id ON playlists(video_id);
@@ -30,13 +31,25 @@ export class MusicDatabase {
         guild_id TEXT PRIMARY KEY,
         request_channel_id TEXT NOT NULL,
         announcement_channel_id TEXT NOT NULL,
-        guide_message_id TEXT
+        guide_message_id TEXT,
+        weekly_message_id TEXT,
+        weekly_message_key TEXT
       );
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     const guildColumns = this.db.prepare('PRAGMA table_info(guild_settings)').all();
+    const playlistColumns = this.db.prepare('PRAGMA table_info(playlists)').all();
+    if (!playlistColumns.some(({ name }) => name === 'user_name')) {
+      this.db.exec('ALTER TABLE playlists ADD COLUMN user_name TEXT');
+    }
     if (!guildColumns.some(({ name }) => name === 'guide_message_id')) {
       this.db.exec('ALTER TABLE guild_settings ADD COLUMN guide_message_id TEXT');
+    }
+    if (!guildColumns.some(({ name }) => name === 'weekly_message_id')) {
+      this.db.exec('ALTER TABLE guild_settings ADD COLUMN weekly_message_id TEXT');
+    }
+    if (!guildColumns.some(({ name }) => name === 'weekly_message_key')) {
+      this.db.exec('ALTER TABLE guild_settings ADD COLUMN weekly_message_key TEXT');
     }
     const insertDay = this.db.prepare('INSERT OR IGNORE INTO day_settings(day) VALUES (?)');
     for (const day of DAYS) insertDay.run(day);
@@ -44,6 +57,18 @@ export class MusicDatabase {
 
   daySongs(day) {
     return this.db.prepare('SELECT * FROM playlists WHERE day=? ORDER BY id').all(day);
+  }
+
+  songsWithoutUserName() {
+    return this.db.prepare('SELECT id, user_id FROM playlists WHERE user_name IS NULL').all();
+  }
+
+  setSongUserName(id, userName) {
+    this.db.prepare('UPDATE playlists SET user_name=? WHERE id=?').run(userName, id);
+  }
+
+  song(id) {
+    return this.db.prepare('SELECT * FROM playlists WHERE id=?').get(id) ?? null;
   }
 
   dayCount(day) {
@@ -59,8 +84,8 @@ export class MusicDatabase {
   }
 
   addSong(song) {
-    return this.db.prepare('INSERT INTO playlists(day,video_id,title,artist,url,user_id) VALUES (?,?,?,?,?,?)')
-      .run(song.day, song.videoId, song.title, song.artist, song.url, song.userId);
+    return this.db.prepare('INSERT INTO playlists(day,video_id,title,artist,url,user_id,user_name) VALUES (?,?,?,?,?,?,?)')
+      .run(song.day, song.videoId, song.title, song.artist, song.url, song.userId, song.userName ?? null);
   }
 
   hasVideo(videoId) {
@@ -82,7 +107,8 @@ export class MusicDatabase {
 
   guildChannels(guildId) {
     return this.db.prepare(`
-      SELECT guild_id, request_channel_id, announcement_channel_id, guide_message_id
+      SELECT guild_id, request_channel_id, announcement_channel_id, guide_message_id,
+             weekly_message_id, weekly_message_key
       FROM guild_settings WHERE guild_id=?
     `).get(guildId) ?? null;
   }
@@ -99,6 +125,11 @@ export class MusicDatabase {
 
   setGuildGuideMessage(guildId, messageId) {
     this.db.prepare('UPDATE guild_settings SET guide_message_id=? WHERE guild_id=?').run(messageId, guildId);
+  }
+
+  setGuildWeeklyMessage(guildId, messageId, key) {
+    this.db.prepare('UPDATE guild_settings SET weekly_message_id=?, weekly_message_key=? WHERE guild_id=?')
+      .run(messageId, key, guildId);
   }
 
   resetWeekly() {

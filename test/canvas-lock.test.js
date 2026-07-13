@@ -48,7 +48,7 @@ test('lock canvas falls back without an avatar when decoding fails', async () =>
   assert.ok(image.length > 10_000);
 });
 
-test('exclusive lock command sends one separate user mention', async () => {
+test('exclusive lock command sends the user mention with the canvas', async () => {
   const replies = [];
   const followUps = [];
   const handler = new CommandHandler({
@@ -77,8 +77,10 @@ test('exclusive lock command sends one separate user mention', async () => {
 
   assert.equal(replies.length, 1);
   assert.equal(replies[0].files[0].name, 'miku-lock.png');
+  assert.equal(replies[0].content, '<@user-a>');
+  assert.deepEqual(replies[0].allowedMentions, { users: ['user-a'] });
   assert.deepEqual(avatarCalls, [{ extension: 'png', size: 256 }]);
-  assert.deepEqual(followUps, [{ content: '<@user-a>', allowedMentions: { users: ['user-a'] } }]);
+  assert.deepEqual(followUps, []);
 });
 
 test('general lock command sends a card without a mention', async () => {
