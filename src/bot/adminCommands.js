@@ -25,7 +25,7 @@ export async function handleLock(database, interaction) {
   const day = interaction.options.getString('요일');
   const locked = interaction.options.getString('상태') === '잠금';
   const user = interaction.options.getUser('유저');
-  const deletedCount = database.setLock(day, locked, locked ? user?.id ?? null : null);
+  const deletedCount = database.setLock(interaction.guildId, day, locked, locked ? user?.id ?? null : null);
   if (!locked) {
     await interaction.reply(`${day}요일 플레이리스트를 열었습니다.`);
     return day;
@@ -46,7 +46,7 @@ export async function handleLock(database, interaction) {
 export function handleShuffle(database, interaction) {
   if (!isAdmin(interaction)) return interaction.reply({ content: '관리자 권한이 필요합니다.', flags: MessageFlags.Ephemeral });
   const day = interaction.options.getString('요일');
-  return interaction.reply({ embeds: [listEmbed(day, database.daySongs(day), true)] });
+  return interaction.reply({ embeds: [listEmbed(day, database.daySongs(interaction.guildId, day), true)] });
 }
 
 export async function handleDelete(database, interaction) {
@@ -55,7 +55,7 @@ export async function handleDelete(database, interaction) {
     return null;
   }
   const day = interaction.options.getString('요일');
-  const song = database.deleteSong(day, interaction.options.getInteger('번호'));
+  const song = database.deleteSong(interaction.guildId, day, interaction.options.getInteger('번호'));
   await interaction.reply(song ? `${songLabel(song)}을 삭제했습니다.` : '해당 번호의 곡이 없습니다.');
   return song ? day : null;
 }
@@ -69,7 +69,7 @@ export async function handleReset(database, interaction) {
     await interaction.reply({ content: '확인에 `초기화`를 입력해주세요.', flags: MessageFlags.Ephemeral });
     return false;
   }
-  database.clearAll();
+  database.clearAll(interaction.guildId);
   await interaction.reply('모든 신청 데이터를 초기화했습니다.');
   return true;
 }

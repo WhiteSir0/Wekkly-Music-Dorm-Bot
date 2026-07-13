@@ -83,6 +83,13 @@ export class CommandHandler {
     await handlers[interaction.commandName]?.();
   }
 
+  removeGuild(guildId) {
+    for (const [key, pending] of this.pending) {
+      if (pending.guildId === guildId) this.pending.delete(key);
+    }
+    this.database.clearGuild(guildId);
+  }
+
   async button(interaction) {
     const [, token, indexText] = interaction.customId.split(':');
     const pending = this.pending.get(token);
@@ -91,14 +98,14 @@ export class CommandHandler {
       await interaction.reply({ content: '선택 시간이 만료됐습니다. 다시 검색해주세요.', flags: MessageFlags.Ephemeral });
       return;
     }
-    if (pending.userId !== interaction.user.id) {
+    if (pending.guildId !== interaction.guildId || pending.userId !== interaction.user.id) {
       await interaction.reply({ content: '검색을 요청한 사용자만 선택할 수 있습니다.', flags: MessageFlags.Ephemeral });
       return;
     }
     const song = pending.results[Number(indexText)];
     const registeredName = await this.userNames(interaction.guildId, interaction.user.id);
     const userName = registeredName ?? interaction.member?.displayName ?? interaction.user.globalName ?? interaction.user.username;
-    const result = this.playlist.register(interaction.user.id, pending.day, song, userName);
+    const result = this.playlist.register(interaction.guildId, interaction.user.id, pending.day, song, userName);
     if (result.ok) this.pending.delete(token);
     await interaction.update({ content: result.ok ? `${songLabel(song)}을 ${pending.day}요일에 등록했습니다.` : result.message, embeds: [], components: [] });
     if (result.ok) await this.refresh(interaction, pending.day);
@@ -175,7 +182,7 @@ export class CommandHandler {
       return;
     }
     const day = interaction.options.getString('요일');
-    const validation = this.playlist.validate(interaction.user.id, day);
+    const validation = this.playlist.validate(interaction.guildId, interaction.user.id, day);
     if (!validation.ok) {
       await interaction.reply({ content: validation.message, flags: MessageFlags.Ephemeral });
       return;
@@ -188,11 +195,11 @@ export class CommandHandler {
     }
     const now = Date.now();
     for (const [key, pending] of this.pending) {
-      if (pending.expiresAt < now || pending.userId === interaction.user.id) this.pending.delete(key);
+      if (pending.expiresAt < now || (pending.guildId === interaction.guildId && pending.userId === interaction.user.id)) this.pending.delete(key);
     }
     if (this.pending.size >= 500) this.pending.delete(this.pending.keys().next().value);
     const token = randomUUID().slice(0, 12);
-    this.pending.set(token, { userId: interaction.user.id, day, results, expiresAt: now + 10 * 60_000 });
+    this.pending.set(token, { guildId: interaction.guildId, userId: interaction.user.id, day, results, expiresAt: now + 10 * 60_000 });
     const embeds = results.map((song, index) => {
       const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`${index + 1}. ${songLabel(song)}`).setURL(song.url);
       if (song.thumbnailUrl) embed.setImage(song.thumbnailUrl);
@@ -224,7 +231,7 @@ export class CommandHandler {
   }
 
   async playlistSong(interaction) {
-    const song = this.database.song(Number(interaction.values[0]));
+    const song = this.database.song(interaction.guildId, Number(interaction.values[0]));
     if (!song) {
       await interaction.reply({ content: '삭제된 곡입니다.', flags: MessageFlags.Ephemeral });
       return;
@@ -269,11 +276,9 @@ export class CommandHandler {
 
   async refresh(interaction, day = null) {
     const key = weekKey(new Date(Date.now() + 9 * 60 * 60_000));
-    for (const guildId of this.guildIds) {
-      await ensureWeeklyStatus({
-        client: interaction.client, database: this.database, guildId, key, forceEdit: true, day,
-      }).catch((error) => console.error('[weekly status]', error));
-    }
+    await ensureWeeklyStatus({
+      client: interaction.client, database: this.database, guildId: interaction.guildId, key, forceEdit: true, day,
+    }).catch((error) => console.error('[weekly status]', error));
   }
 }
 

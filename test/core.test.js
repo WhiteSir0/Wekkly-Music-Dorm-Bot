@@ -89,10 +89,11 @@ test('주간 중복곡과 사용자 2곡 제한을 적용한다', () => {
     database = new MusicDatabase(join(directory, 'music.db'));
     const service = new PlaylistService(database, () => new Date('2026-07-12T01:00:00Z'));
     const song = (videoId) => ({ videoId, title: videoId, artist: 'Teto', url: `https://youtu.be/${videoId}`, durationSeconds: 200 });
-    assert.equal(service.register('user-a', '월', song('one')).ok, true);
-    assert.equal(service.register('user-b', '화', song('one')).ok, false);
-    assert.equal(service.register('user-a', '화', song('two')).ok, true);
-    assert.equal(service.register('user-a', '수', song('three')).ok, false);
+    assert.equal(service.register('guild-a', 'user-a', '월', song('one')).ok, true);
+    assert.equal(service.register('guild-a', 'user-b', '화', song('one')).ok, false);
+    assert.equal(service.register('guild-a', 'user-a', '화', song('two')).ok, true);
+    assert.equal(service.register('guild-a', 'user-a', '수', song('three')).ok, false);
+    assert.equal(service.register('guild-b', 'user-a', '월', song('one')).ok, true);
   } finally {
     database?.close();
     rmSync(directory, { recursive: true, force: true });
@@ -135,13 +136,66 @@ test('플리 잠금은 삭제한 곡 수를 반환한다', () => {
   let database;
   try {
     database = new MusicDatabase(join(directory, 'music.db'));
-    database.addSong({ day: '월', videoId: 'one', title: 'One', artist: null, url: 'https://youtu.be/one', userId: 'user-a' });
-    database.addSong({ day: '월', videoId: 'two', title: 'Two', artist: null, url: 'https://youtu.be/two', userId: 'user-b' });
+    database.addSong('guild-a', { day: '월', videoId: 'one', title: 'One', artist: null, url: 'https://youtu.be/one', userId: 'user-a' });
+    database.addSong('guild-a', { day: '월', videoId: 'two', title: 'Two', artist: null, url: 'https://youtu.be/two', userId: 'user-b' });
 
-    assert.equal(database.setLock('월', true, 'user-a'), 2);
-    assert.equal(database.setLock('월', false), 0);
+    assert.equal(database.setLock('guild-a', '월', true, 'user-a'), 2);
+    assert.equal(database.setLock('guild-a', '월', false), 0);
   } finally {
     database?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('서버에서 추방되면 해당 서버 데이터만 삭제한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-guild-cleanup-'));
+  const database = new MusicDatabase(join(directory, 'music.db'));
+  try {
+    for (const guildId of ['guild-a', 'guild-b']) {
+      database.setGuildChannels(guildId, `request-${guildId}`, `notice-${guildId}`);
+      database.addSong(guildId, { day: '월', videoId: `song-${guildId}`, title: guildId, artist: null, url: `https://youtu.be/${guildId}`, userId: 'user-a' });
+      database.archiveWeek(guildId, '2026-07-12');
+      database.setMeta(guildId, 'last_weekly_reset', '2026-07-12');
+    }
+    database.clearGuild('guild-a');
+
+    assert.equal(database.guildChannels('guild-a'), null);
+    assert.equal(database.daySongs('guild-a', '월').length, 0);
+    assert.equal(database.historyWeeks('guild-a').length, 0);
+    assert.equal(database.meta('guild-a', 'last_weekly_reset'), null);
+    assert.equal(database.daySongs('guild-b', '월').length, 1);
+    assert.deepEqual(database.historyWeeks('guild-b'), ['2026-07-12']);
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('기존 공용 플리 데이터는 설정된 서버로 이전한다', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wekkly-guild-migration-'));
+  const path = join(directory, 'music.db');
+  const legacy = new DatabaseSync(path);
+  legacy.exec(`
+    CREATE TABLE guild_settings (guild_id TEXT PRIMARY KEY, request_channel_id TEXT NOT NULL, announcement_channel_id TEXT NOT NULL);
+    INSERT INTO guild_settings VALUES ('guild-a', 'request-a', 'notice-a');
+    CREATE TABLE playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, artist TEXT, url TEXT NOT NULL, user_id TEXT NOT NULL, user_name TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    INSERT INTO playlists(day,video_id,title,url,user_id) VALUES ('월','legacy-song','기존 곡','https://youtu.be/legacy','user-a');
+    CREATE TABLE day_settings (day TEXT PRIMARY KEY, locked INTEGER NOT NULL DEFAULT 0, exclusive_user_id TEXT);
+    INSERT INTO day_settings VALUES ('월', 1, 'user-a');
+    CREATE TABLE playlist_history (week_key TEXT NOT NULL, day TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, artist TEXT, url TEXT NOT NULL, user_id TEXT NOT NULL, user_name TEXT, position INTEGER NOT NULL, PRIMARY KEY (week_key, video_id));
+    INSERT INTO playlist_history VALUES ('2026-07-05','월','old-history','지난 곡',NULL,'https://youtu.be/history','user-a',NULL,1);
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO meta VALUES ('last_weekly_reset','2026-07-05');
+  `);
+  legacy.close();
+  const database = new MusicDatabase(path);
+  try {
+    assert.equal(database.daySongs('guild-a', '월')[0].video_id, 'legacy-song');
+    assert.equal(database.setting('guild-a', '월').exclusive_user_id, 'user-a');
+    assert.deepEqual(database.historyWeeks('guild-a'), ['2026-07-05']);
+    assert.equal(database.meta('guild-a', 'last_weekly_reset'), '2026-07-05');
+  } finally {
+    database.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -307,8 +361,8 @@ test('한 길드 등록이 실패해도 나머지 길드를 등록한다', async
 test('마감 공지를 보내지 못하면 완료 처리하지 않는다', async () => {
   const meta = new Map();
   const database = {
-    meta: (key) => meta.get(key) ?? null,
-    setMeta: (key, value) => meta.set(key, value),
+    meta: (_guildId, key) => meta.get(key) ?? null,
+    setMeta: (_guildId, key, value) => meta.set(key, value),
     archiveWeek: () => {}, resetWeekly: () => {},
     daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
     setting: () => ({ locked: 0, exclusive_user_id: null }),
@@ -343,8 +397,8 @@ test('일부 마감 공지만 실패하면 성공한 채널에는 다시 보내�
     },
   };
   const database = {
-    meta: (key) => meta.get(key) ?? null,
-    setMeta: (key, value) => meta.set(key, value),
+    meta: (_guildId, key) => meta.get(key) ?? null,
+    setMeta: (_guildId, key, value) => meta.set(key, value),
     archiveWeek: () => {}, resetWeekly: () => {},
     daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
     setting: () => ({ locked: 0, exclusive_user_id: null }),
@@ -368,8 +422,8 @@ test('스케줄러는 길드별로 설정된 공지 채널을 사용한다', asy
   const meta = new Map();
   const sends = [];
   const database = {
-    meta: (key) => meta.get(key) ?? null,
-    setMeta: (key, value) => meta.set(key, value),
+    meta: (_guildId, key) => meta.get(key) ?? null,
+    setMeta: (_guildId, key, value) => meta.set(key, value),
     archiveWeek: () => {}, resetWeekly: () => {},
     daySongs: () => [{ title: '곡', url: 'https://youtu.be/song' }],
     setting: () => ({ locked: 0, exclusive_user_id: null }),

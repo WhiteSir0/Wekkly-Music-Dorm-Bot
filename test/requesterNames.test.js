@@ -7,7 +7,7 @@ async function selectedRequesterName(registeredName) {
   const handler = new CommandHandler({
     database: {},
     playlist: {
-      register(_userId, _day, _song, userName) {
+      register(_guildId, _userId, _day, _song, userName) {
         requesterName = userName;
         return { ok: false, message: 'test complete' };
       },
@@ -17,6 +17,7 @@ async function selectedRequesterName(registeredName) {
     userNames: async () => registeredName,
   });
   handler.pending.set('request', {
+    guildId: 'guild-a',
     userId: 'user-a',
     day: '월',
     results: [{ videoId: 'song-a', title: 'Song A', artist: 'Artist', url: 'https://youtu.be/song-a' }],

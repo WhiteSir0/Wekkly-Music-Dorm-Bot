@@ -51,13 +51,10 @@ client.once(Events.ClientReady, async (readyClient) => {
   updatePresence();
   setInterval(updatePresence, 3 * 60_000);
   for (const song of database.songsWithoutUserName()) {
-    for (const guildId of guildIds) {
-      const guild = await readyClient.guilds.fetch(guildId).catch(() => null);
-      const member = await guild?.members.fetch(song.user_id).catch(() => null);
-      if (member) {
-        database.setSongUserName(song.id, member.displayName);
-        break;
-      }
+    const guild = await readyClient.guilds.fetch(song.guild_id).catch(() => null);
+    const member = await guild?.members.fetch(song.user_id).catch(() => null);
+    if (member) {
+      database.setSongUserName(song.guild_id, song.id, member.displayName);
     }
   }
   for (const guildId of guildIds) {
@@ -72,6 +69,11 @@ client.once(Events.ClientReady, async (readyClient) => {
     fallbackChannels,
   }).start();
   console.log(`Logged in as ${readyClient.user.tag}`);
+});
+
+client.on(Events.GuildDelete, (guild) => {
+  handler.removeGuild(guild.id);
+  console.log('서버 데이터 정리 완료', { guildId: guild.id });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

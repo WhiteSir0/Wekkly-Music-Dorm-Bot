@@ -21,7 +21,7 @@ export async function showReportModal(interaction) {
 }
 
 export async function submitReport(database, interaction) {
-  const song = database.song(Number(interaction.customId.split(':')[2]));
+  const song = database.song(interaction.guildId, Number(interaction.customId.split(':')[2]));
   const channels = database.guildChannels(interaction.guildId);
   if (!song || !channels) {
     await interaction.reply({ content: '신고할 곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
@@ -77,13 +77,13 @@ export async function resolveReport(database, interaction) {
   const reportKey = `report:${messageId}`;
   const now = Date.now();
   const claim = `processing:${now}:${action}:${interaction.user.id}`;
-  if (!database.claimMeta(reportKey, claim, now - 5 * 60_000)) {
+  if (!database.claimMeta(interaction.guildId, reportKey, claim, now - 5 * 60_000)) {
     await interaction.reply({ content: '이미 처리된 신고입니다.', flags: MessageFlags.Ephemeral });
     return null;
   }
   let completed = false;
   try {
-    const song = database.song(Number(songId));
+    const song = database.song(interaction.guildId, Number(songId));
     const message = await interaction.channel?.messages.fetch(messageId).catch(() => null);
     if (!song || !message?.embeds?.[0]) {
       await interaction.reply({ content: '신고 또는 신청곡을 찾지 못했습니다.', flags: MessageFlags.Ephemeral });
@@ -99,12 +99,12 @@ export async function resolveReport(database, interaction) {
         { name: reasonLabel, value: reason },
       );
     await message.edit({ embeds: [embed], components: [], allowedMentions: { parse: [] } });
-    const deleted = action === 'delete' ? database.deleteSongById(song.id) : null;
-    database.setMeta(reportKey, action);
+    const deleted = action === 'delete' ? database.deleteSongById(interaction.guildId, song.id) : null;
+    database.setMeta(interaction.guildId, reportKey, action);
     completed = true;
     await interaction.reply({ content: `${result}했습니다.`, flags: MessageFlags.Ephemeral });
     return deleted?.day ?? null;
   } finally {
-    if (!completed) database.clearMeta(reportKey, claim);
+    if (!completed) database.clearMeta(interaction.guildId, reportKey, claim);
   }
 }

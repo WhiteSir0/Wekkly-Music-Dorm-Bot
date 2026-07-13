@@ -13,8 +13,8 @@ export function weekLabel(key) {
   return `${month}월 ${Math.ceil(date / 7)}주차`;
 }
 
-export function dayStatusPayload(database, day, key = null) {
-  const songs = key ? database.historyDaySongs(key, day) : database.daySongs(day);
+export function dayStatusPayload(database, guildId, day, key = null) {
+  const songs = key ? database.historyDaySongs(guildId, key, day) : database.daySongs(guildId, day);
   const label = key ? weekLabel(key) : '이번 주';
   const payload = { files: [{ attachment: renderDayPlaylistCanvas(day, songs, label), name: `${day}-playlist.png` }], components: [] };
   if (songs.length && !key) {
@@ -37,8 +37,8 @@ export function historyOverviewPayload(key) {
   };
 }
 
-export function historyDayStatusPayload(database, key, day) {
-  const songs = database.historyDaySongs(key, day);
+export function historyDayStatusPayload(database, guildId, key, day) {
+  const songs = database.historyDaySongs(guildId, key, day);
   const payload = {
     content: '',
     files: [{ attachment: renderDayPlaylistCanvas(day, songs, weekLabel(key)), name: `${day}-playlist.png` }],
@@ -85,7 +85,7 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
     : null;
   for (const day of DAYS) {
     if (forceEdit && changedDay && settings.weekly_message_key === key && day !== changedDay) continue;
-    const payload = dayStatusPayload(database, day);
+    const payload = dayStatusPayload(database, guildId, day);
     let message = messageIds[day] ? await channel.messages?.fetch(messageIds[day]).catch(() => null) : null;
     if (message) await message.edit({ ...payload, attachments: [] });
     else {
