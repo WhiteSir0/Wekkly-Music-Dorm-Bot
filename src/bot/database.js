@@ -297,6 +297,38 @@ export class MusicDatabase {
     this.db.prepare('DELETE FROM meta WHERE guild_id=? AND key=? AND value=?').run(guildId, key, value);
   }
 
+  completeReport(guildId, key, claim, resolution, songId) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = this.meta(guildId, key);
+      if (current !== claim) {
+        this.db.exec('ROLLBACK');
+        return { ok: false, song: null };
+      }
+      const song = this.song(guildId, songId);
+      if (resolution.action === 'delete' && song) {
+        this.db.prepare('DELETE FROM playlists WHERE guild_id=? AND id=?').run(guildId, songId);
+      }
+      this.db.prepare('UPDATE meta SET value=? WHERE guild_id=? AND key=? AND value=?')
+        .run(`resolved:${JSON.stringify(resolution)}`, guildId, key, claim);
+      this.db.exec('COMMIT');
+      return { ok: true, song };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  resolvedReport(guildId, key) {
+    const value = this.meta(guildId, key);
+    if (!value?.startsWith('resolved:')) return null;
+    try {
+      return JSON.parse(value.slice(9));
+    } catch {
+      return null;
+    }
+  }
+
   clearGuild(guildId) {
     this.db.exec('BEGIN');
     try {

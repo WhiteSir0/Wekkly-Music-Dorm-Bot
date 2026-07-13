@@ -51,11 +51,11 @@ client.once(Events.ClientReady, async (readyClient) => {
   updatePresence();
   setInterval(updatePresence, 3 * 60_000);
   for (const song of database.songsWithoutUserName()) {
+    const registeredName = await registeredUsers.name(song.guild_id, song.user_id);
     const guild = await readyClient.guilds.fetch(song.guild_id).catch(() => null);
     const member = await guild?.members.fetch(song.user_id).catch(() => null);
-    if (member) {
-      database.setSongUserName(song.guild_id, song.id, member.displayName);
-    }
+    const userName = registeredName ?? member?.displayName;
+    if (userName) database.setSongUserName(song.guild_id, song.id, userName);
   }
   for (const guildId of guildIds) {
     await ensureWeeklyStatus({

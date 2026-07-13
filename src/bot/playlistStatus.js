@@ -71,6 +71,16 @@ export function songDetailPayload(song, reportable = true) {
   };
 }
 
+async function fetchStoredMessage(channel, messageId) {
+  if (!messageId) return null;
+  try {
+    return await channel.messages?.fetch(messageId) ?? null;
+  } catch (error) {
+    if (error?.code === 10008) return null;
+    throw error;
+  }
+}
+
 export async function ensureWeeklyStatus({ client, database, guildId, key, forceEdit = false, day: changedDay = null }) {
   const settings = database.guildChannels(guildId);
   if (!settings) return null;
@@ -80,13 +90,11 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
     && settings.weekly_message_key === key && DAYS.every((day) => messageIds[day])) return messageIds;
   const channel = await client.channels.fetch(settings.request_channel_id).catch(() => null);
   if (!channel?.isTextBased()) return null;
-  const legacyMessage = settings.weekly_message_id
-    ? await channel.messages?.fetch(settings.weekly_message_id).catch(() => null)
-    : null;
+  const legacyMessage = await fetchStoredMessage(channel, settings.weekly_message_id);
   for (const day of DAYS) {
     if (forceEdit && changedDay && settings.weekly_message_key === key && day !== changedDay) continue;
     const payload = dayStatusPayload(database, guildId, day);
-    let message = messageIds[day] ? await channel.messages?.fetch(messageIds[day]).catch(() => null) : null;
+    let message = await fetchStoredMessage(channel, messageIds[day]);
     if (message) await message.edit({ ...payload, attachments: [] });
     else {
       message = await channel.send(payload);
