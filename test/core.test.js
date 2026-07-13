@@ -14,6 +14,7 @@ import { Scheduler } from '../src/bot/scheduler.js';
 import { isTailscaleIpv4 } from '../src/search/config.js';
 import { GUIDE_COPY, renderGuideCanvas } from '../src/bot/canvas.js';
 import { DatabaseSync } from 'node:sqlite';
+import { MessageFlags } from 'discord.js';
 
 test('YouTube Music 검색은 앨범이 있는 노래만 반환한다', () => {
   const contents = new Set([
@@ -229,6 +230,37 @@ test('채널 설정은 저장된 안내 메시지를 새로 만들지 않고 교
   assert.equal(sends.length, 0);
   assert.equal(weeklyEdits.length, 5);
   assert.equal(savedMessageId, 'guide-a');
+});
+
+test('기존 현황 삭제가 실패하면 채널 설정을 바꾸지 않는다', async () => {
+  let settingsChanged = false;
+  const replies = [];
+  const oldChannel = {
+    isTextBased: () => true,
+    messages: { fetch: async () => ({ delete: async () => { throw new Error('temporary'); } }) },
+  };
+  const requestChannel = { id: 'request-new', toString: () => '<#request-new>' };
+  const announcementChannel = { id: 'announcement-new', toString: () => '<#announcement-new>' };
+  const reportChannel = { id: 'report-new', toString: () => '<#report-new>' };
+  const handler = new CommandHandler({
+    database: {
+      guildChannels: () => ({ request_channel_id: 'request-old', weekly_message_id: 'legacy', day_message_ids: '{}' }),
+      setGuildChannels: () => { settingsChanged = true; },
+    },
+    playlist: {}, search: {}, guildIds: ['guild-a'],
+  });
+
+  await handler.execute({
+    commandName: '채널설정', guildId: 'guild-a',
+    memberPermissions: { has: () => true },
+    client: { channels: { fetch: async () => oldChannel } },
+    options: { getChannel: (name) => ({ 신청채널: requestChannel, 공지채널: announcementChannel, 신고채널: reportChannel })[name] },
+    reply: async (payload) => replies.push(payload),
+  });
+
+  assert.equal(settingsChanged, false);
+  assert.match(replies[0].content, /다시 시도/);
+  assert.equal(replies[0].flags, MessageFlags.Ephemeral);
 });
 
 test('신청 명령은 길드에 설정된 신청 채널 밖에서 거절된다', async () => {

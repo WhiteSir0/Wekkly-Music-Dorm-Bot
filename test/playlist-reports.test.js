@@ -109,3 +109,25 @@ test('기각은 곡을 유지하고 기각 사유만 남긴다', async () => {
   assert.equal(day, null);
   assert.equal(edits[0].embeds[0].data.fields.find(({ name }) => name === '기각 사유').value, '문제 없음');
 });
+
+test('신고 글 수정이 실패하면 곡을 삭제하지 않는다', async () => {
+  let deleted = false;
+  const database = {
+    song: () => song,
+    deleteSongById: () => { deleted = true; return song; },
+    meta: () => null,
+    setMeta: () => assert.fail('실패한 처리를 완료로 저장하면 안 됩니다.'),
+  };
+  await assert.rejects(() => resolveReport(database, {
+    customId: 'report:resolve:delete:7:message-a', user: { id: 'admin-a' },
+    memberPermissions: { has: () => true },
+    fields: { getTextInputValue: () => '중복 신청' },
+    channel: { messages: { fetch: async () => ({
+      embeds: [new EmbedBuilder().setTitle('신청곡 신고')],
+      edit: async () => { throw new Error('temporary'); },
+    }) } },
+    reply: async () => {},
+  }), /temporary/);
+
+  assert.equal(deleted, false);
+});

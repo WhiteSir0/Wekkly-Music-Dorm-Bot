@@ -104,13 +104,19 @@ export async function ensureWeeklyStatus({ client, database, guildId, key, force
 
 export async function deleteStoredStatusMessages(client, settings) {
   if (!settings?.request_channel_id) return;
-  const channel = await client.channels.fetch(settings.request_channel_id).catch(() => null);
-  if (!channel?.isTextBased()) return;
+  const channel = await client.channels.fetch(settings.request_channel_id);
+  if (!channel?.isTextBased()) throw new Error('기존 신청 채널을 찾지 못했습니다.');
   let dayMessageIds = {};
   try { dayMessageIds = JSON.parse(settings.day_message_ids || '{}'); } catch { dayMessageIds = {}; }
   const ids = new Set([settings.weekly_message_id, ...Object.values(dayMessageIds)].filter(Boolean));
   for (const id of ids) {
-    const message = await channel.messages?.fetch(id).catch(() => null);
-    await message?.delete().catch(() => null);
+    let message;
+    try {
+      message = await channel.messages?.fetch(id);
+    } catch (error) {
+      if (error?.code === 10008) continue;
+      throw error;
+    }
+    await message?.delete();
   }
 }

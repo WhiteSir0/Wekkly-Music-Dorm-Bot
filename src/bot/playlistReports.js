@@ -85,7 +85,6 @@ export async function resolveReport(database, interaction) {
     return null;
   }
   const reason = interaction.fields.getTextInputValue('reason');
-  const deleted = action === 'delete' ? database.deleteSongById(song.id) : null;
   const result = action === 'delete' ? '삭제 처리' : '기각';
   const reasonLabel = action === 'delete' ? '삭제 사유' : '기각 사유';
   const embed = EmbedBuilder.from(message.embeds[0]).setColor(action === 'delete' ? 0xed4245 : 0x747f8d)
@@ -95,6 +94,7 @@ export async function resolveReport(database, interaction) {
       { name: reasonLabel, value: reason },
     );
   await message.edit({ embeds: [embed], components: [], allowedMentions: { parse: [] } });
+  const deleted = action === 'delete' ? database.deleteSongById(song.id) : null;
   database.setMeta(`report:${messageId}`, action);
   await interaction.reply({ content: `${result}했습니다.`, flags: MessageFlags.Ephemeral });
   return deleted?.day ?? null;

@@ -132,7 +132,12 @@ export class CommandHandler {
     const reportChannel = interaction.options.getChannel('신고채널');
     const previous = this.database.guildChannels(interaction.guildId);
     if (previous && previous.request_channel_id !== requestChannel.id) {
-      await deleteStoredStatusMessages(interaction.client, previous);
+      try {
+        await deleteStoredStatusMessages(interaction.client, previous);
+      } catch {
+        await interaction.reply({ content: '기존 현황 메시지를 정리하지 못했습니다. 잠시 후 다시 시도해주세요.', flags: MessageFlags.Ephemeral });
+        return;
+      }
     }
     this.database.setGuildChannels(interaction.guildId, requestChannel.id, announcementChannel.id, reportChannel.id);
     const payload = { files: [{ attachment: await renderGuideCanvas(), name: 'miku-guide.png' }] };
