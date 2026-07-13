@@ -77,10 +77,10 @@ client.once(Events.ClientReady, async (readyClient) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isButton() && interaction.customId.startsWith('song:')) await handler.button(interaction);
-    else if (interaction.isButton() && interaction.customId.startsWith('playlist:day:')) await handler.playlistDay(interaction);
     else if (interaction.isButton() && interaction.customId.startsWith('playlist:report:')) await handler.reportButton(interaction);
     else if (interaction.isStringSelectMenu() && interaction.customId.startsWith('playlist:song:')) await handler.playlistSong(interaction);
     else if (interaction.isModalSubmit() && interaction.customId.startsWith('playlist:report:')) await handler.reportSubmit(interaction);
+    else if (interaction.isAutocomplete()) await handler.autocomplete(interaction);
     else if (interaction.isChatInputCommand()) await handler.execute(interaction);
   } catch (error) {
     console.error('[interaction]', error);

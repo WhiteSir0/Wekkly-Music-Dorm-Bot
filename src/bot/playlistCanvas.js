@@ -1,5 +1,5 @@
 import { createCanvas } from '@napi-rs/canvas';
-import { DAYS, MAX_SONGS } from '../shared/constants.js';
+import { MAX_SONGS } from '../shared/constants.js';
 
 const font = '"Noto Sans CJK KR", "Malgun Gothic", sans-serif';
 const colors = { ink: '#292536', paper: '#fbfeff', grid: '#cceff1', cyan: '#85dce0', pink: '#f2a7c0', lilac: '#c8c1ee' };
@@ -37,41 +37,8 @@ function requester(song) {
   return song.user_name || `사용자 ${String(song.user_id).slice(-6)}`;
 }
 
-export function renderWeeklyPlaylistCanvas(database) {
-  const { canvas, context } = base(1400, 788, '이번 주 플레이리스트', '요일을 누르면 곡과 신청자를 자세히 볼 수 있어요.');
-  const width = 246;
-  DAYS.forEach((day, index) => {
-    const songs = database.daySongs(day);
-    const x = 54 + index * 266;
-    context.fillStyle = index % 2 ? '#fff0f6' : '#e1f8f8';
-    context.fillRect(x, 256, width, 446);
-    context.strokeStyle = colors.ink;
-    context.lineWidth = 3;
-    context.strokeRect(x, 256, width, 446);
-    context.fillStyle = index % 2 ? colors.pink : colors.cyan;
-    context.fillRect(x, 256, width, 62);
-    context.fillStyle = colors.ink;
-    context.font = `700 25px ${font}`;
-    context.fillText(`${day}요일`, x + 18, 296);
-    context.font = `600 18px ${font}`;
-    context.fillText(`${songs.length} / ${MAX_SONGS[day]}곡`, x + 18, 348);
-    context.font = `600 17px ${font}`;
-    songs.slice(0, 5).forEach((song, songIndex) => {
-      const y = 388 + songIndex * 65;
-      context.fillText(`${songIndex + 1}. ${shorten(song.title, 18)}`, x + 18, y);
-      context.fillStyle = '#686170';
-      context.font = `500 15px ${font}`;
-      context.fillText(`${shorten(song.artist || '가수 정보 없음', 15)} · ${shorten(requester(song), 11)}`, x + 18, y + 25);
-      context.fillStyle = colors.ink;
-      context.font = `600 17px ${font}`;
-    });
-    if (!songs.length) context.fillText('아직 신청곡 없음', x + 18, 392);
-  });
-  return canvas.toBuffer('image/png');
-}
-
-export function renderDayPlaylistCanvas(day, songs) {
-  const { canvas, context } = base(1400, 900, `${day}요일 신청곡`, `${songs.length} / ${MAX_SONGS[day]}곡 · 곡을 선택하면 링크와 신청자를 확인할 수 있어요.`);
+export function renderDayPlaylistCanvas(day, songs, label = '이번 주') {
+  const { canvas, context } = base(1400, 900, `${label} ${day}요일 플리`, `${songs.length} / ${MAX_SONGS[day]}곡`);
   context.fillStyle = '#fff';
   context.fillRect(54, 250, 1292, 590);
   context.strokeStyle = colors.ink;

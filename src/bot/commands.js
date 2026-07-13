@@ -15,8 +15,9 @@ import {
 import { DAYS } from '../shared/constants.js';
 import { songLabel } from './playlistService.js';
 import { renderGuideCanvas } from './canvas.js';
-import { dayStatusPayload, ensureWeeklyStatus, songDetailPayload, weekKey, weeklyStatusPayload } from './playlistStatus.js';
+import { ensureWeeklyStatus, songDetailPayload, weekKey } from './playlistStatus.js';
 import { handleDelete, handleLock, handleReset, handleShuffle } from './adminCommands.js';
+import { handleHistory, handleHistoryAutocomplete, handleView } from './playlistViews.js';
 
 const dayChoices = DAYS.map((day) => ({ name: day, value: day }));
 
@@ -30,7 +31,9 @@ export function commandData() {
     new SlashCommandBuilder().setName('정보').setDescription('봇 정보와 원본 소스를 확인합니다.'),
     dayOption(new SlashCommandBuilder().setName('신청').setDescription('요일 플레이리스트에 노래를 신청합니다.')
       .addStringOption((option) => option.setName('제목').setDescription('검색할 곡 제목').setRequired(true).setMaxLength(100))),
-    dayOption(new SlashCommandBuilder().setName('보기').setDescription('이번 주 플레이리스트를 확인합니다.'), false),
+    dayOption(new SlashCommandBuilder().setName('보기').setDescription('이번 주 요일별 플레이리스트를 확인합니다.')),
+    dayOption(new SlashCommandBuilder().setName('지난플리').setDescription('저장된 주차별 플레이리스트를 확인합니다.')
+      .addStringOption((option) => option.setName('주차').setDescription('확인할 주차').setRequired(true).setAutocomplete(true))),
     new SlashCommandBuilder().setName('채널설정').setDescription('이 서버의 신청 및 공지 채널을 설정합니다.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((option) => option.setName('신청채널').setDescription('노래 신청 명령을 사용할 채널')
@@ -72,6 +75,7 @@ export class CommandHandler {
     }
     const handlers = {
       도움말: () => this.help(interaction), 정보: () => this.info(interaction), 신청: () => this.request(interaction), 보기: () => this.view(interaction),
+      지난플리: () => this.history(interaction),
       채널설정: () => this.configureChannels(interaction),
       플리제한: () => this.lock(interaction), 셔플: () => this.shuffle(interaction), 삭제: () => this.delete(interaction),
       db초기화: () => this.reset(interaction),
@@ -100,6 +104,7 @@ export class CommandHandler {
     if (result.ok) await ensureWeeklyStatus({
       client: interaction.client, database: this.database, guildId: interaction.guildId,
       key: weekKey(new Date(Date.now() + 9 * 60 * 60_000)), forceEdit: true,
+      day: pending.day,
     }).catch((error) => console.error('[weekly status]', error));
   }
 
@@ -193,14 +198,15 @@ export class CommandHandler {
   }
 
   async view(interaction) {
-    const day = interaction.options.getString('요일');
-    const payload = day ? dayStatusPayload(this.database, day) : weeklyStatusPayload(this.database);
-    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+    await handleView(this.database, interaction);
   }
 
-  async playlistDay(interaction) {
-    const day = interaction.customId.split(':')[2];
-    await interaction.reply({ ...dayStatusPayload(this.database, day), flags: MessageFlags.Ephemeral });
+  async history(interaction) {
+    await handleHistory(this.database, interaction);
+  }
+
+  async autocomplete(interaction) {
+    await handleHistoryAutocomplete(this.database, interaction);
   }
 
   async playlistSong(interaction) {
@@ -209,7 +215,7 @@ export class CommandHandler {
       await interaction.update({ content: '삭제된 곡입니다.', embeds: [], components: [], attachments: [] });
       return;
     }
-    await interaction.update(songDetailPayload(song));
+    await interaction.reply({ ...songDetailPayload(song), flags: MessageFlags.Ephemeral });
   }
 
   async reportButton(interaction) {

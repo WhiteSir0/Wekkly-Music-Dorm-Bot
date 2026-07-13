@@ -1,6 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } from 'discord.js';
 import { DAYS } from '../shared/constants.js';
-import { renderDayPlaylistCanvas, renderWeeklyPlaylistCanvas } from './playlistCanvas.js';
+import { renderDayPlaylistCanvas } from './playlistCanvas.js';
 
 export function weekKey(current) {
   const date = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
@@ -8,18 +8,16 @@ export function weekKey(current) {
   return date.toISOString().slice(0, 10);
 }
 
-export function weeklyStatusPayload(database) {
-  return {
-    files: [{ attachment: renderWeeklyPlaylistCanvas(database), name: 'weekly-playlist.png' }],
-    components: [new ActionRowBuilder().addComponents(DAYS.map((day) => new ButtonBuilder()
-      .setCustomId(`playlist:day:${day}`).setLabel(day).setStyle(ButtonStyle.Primary)))],
-  };
+export function weekLabel(key) {
+  const [, month, date] = key.split('-').map(Number);
+  return `${month}월 ${Math.ceil(date / 7)}주차`;
 }
 
-export function dayStatusPayload(database, day) {
-  const songs = database.daySongs(day);
-  const payload = { files: [{ attachment: renderDayPlaylistCanvas(day, songs), name: `${day}-playlist.png` }], components: [] };
-  if (songs.length) {
+export function dayStatusPayload(database, day, key = null) {
+  const songs = key ? database.historyDaySongs(key, day) : database.daySongs(day);
+  const label = key ? weekLabel(key) : '이번 주';
+  const payload = { files: [{ attachment: renderDayPlaylistCanvas(day, songs, label), name: `${day}-playlist.png` }], components: [] };
+  if (songs.length && !key) {
     const menu = new StringSelectMenuBuilder().setCustomId(`playlist:song:${day}`).setPlaceholder('곡 선택')
       .addOptions(songs.map((song, index) => ({
         label: `${index + 1}. ${song.title}`.slice(0, 100),
@@ -37,26 +35,35 @@ export function songDetailPayload(song) {
   return {
     embeds: [embed], files: [], attachments: [],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setLabel('유튜브에서 듣기').setURL(song.url).setStyle(ButtonStyle.Link),
+      new ButtonBuilder().setLabel('보기').setURL(song.url).setStyle(ButtonStyle.Link),
       new ButtonBuilder().setCustomId(`playlist:report:${song.id}`).setLabel('신고하기').setStyle(ButtonStyle.Danger),
     )],
     allowedMentions: { parse: [] },
   };
 }
 
-export async function ensureWeeklyStatus({ client, database, guildId, key, forceEdit = false }) {
+export async function ensureWeeklyStatus({ client, database, guildId, key, forceEdit = false, day: changedDay = null }) {
   const settings = database.guildChannels(guildId);
   if (!settings) return null;
-  if (!forceEdit && settings.weekly_message_id && settings.weekly_message_key === key) return settings.weekly_message_id;
+  let messageIds = {};
+  try { messageIds = JSON.parse(settings.day_message_ids || '{}'); } catch { messageIds = {}; }
+  if (!forceEdit && settings.weekly_message_key === key && DAYS.every((day) => messageIds[day])) return messageIds;
   const channel = await client.channels.fetch(settings.request_channel_id).catch(() => null);
   if (!channel?.isTextBased()) return null;
-  const payload = weeklyStatusPayload(database);
-  let message = null;
-  if (settings.weekly_message_id && settings.weekly_message_key === key) {
-    message = await channel.messages?.fetch(settings.weekly_message_id).catch(() => null);
+  const legacyMessage = settings.weekly_message_id
+    ? await channel.messages?.fetch(settings.weekly_message_id).catch(() => null)
+    : null;
+  for (const day of DAYS) {
+    if (forceEdit && changedDay && settings.weekly_message_key === key && day !== changedDay) continue;
+    const payload = dayStatusPayload(database, day);
+    let message = messageIds[day] ? await channel.messages?.fetch(messageIds[day]).catch(() => null) : null;
     if (message) await message.edit({ ...payload, attachments: [] });
+    else {
+      message = await channel.send(payload);
+      messageIds[day] = message.id;
+    }
   }
-  if (!message) message = await channel.send(payload);
-  database.setGuildWeeklyMessage(guildId, message.id, key);
-  return message.id;
+  await legacyMessage?.delete().catch(() => null);
+  database.setGuildDayMessages(guildId, messageIds, key);
+  return messageIds;
 }

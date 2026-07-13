@@ -35,6 +35,19 @@ export class MusicDatabase {
         weekly_message_id TEXT,
         weekly_message_key TEXT
       );
+      CREATE TABLE IF NOT EXISTS playlist_history (
+        week_key TEXT NOT NULL,
+        day TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        artist TEXT,
+        url TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (week_key, video_id)
+      );
+      CREATE INDEX IF NOT EXISTS playlist_history_week_day ON playlist_history(week_key, day, position);
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     const guildColumns = this.db.prepare('PRAGMA table_info(guild_settings)').all();
@@ -51,6 +64,9 @@ export class MusicDatabase {
     if (!guildColumns.some(({ name }) => name === 'weekly_message_key')) {
       this.db.exec('ALTER TABLE guild_settings ADD COLUMN weekly_message_key TEXT');
     }
+    if (!guildColumns.some(({ name }) => name === 'day_message_ids')) {
+      this.db.exec("ALTER TABLE guild_settings ADD COLUMN day_message_ids TEXT NOT NULL DEFAULT '{}'");
+    }
     const insertDay = this.db.prepare('INSERT OR IGNORE INTO day_settings(day) VALUES (?)');
     for (const day of DAYS) insertDay.run(day);
   }
@@ -65,6 +81,35 @@ export class MusicDatabase {
 
   setSongUserName(id, userName) {
     this.db.prepare('UPDATE playlists SET user_name=? WHERE id=?').run(userName, id);
+  }
+
+  historyDaySongs(key, day) {
+    return this.db.prepare('SELECT * FROM playlist_history WHERE week_key=? AND day=? ORDER BY position').all(key, day);
+  }
+
+  historyWeeks() {
+    return this.db.prepare('SELECT DISTINCT week_key FROM playlist_history ORDER BY week_key DESC').all()
+      .map(({ week_key: key }) => key);
+  }
+
+  archiveWeek(key) {
+    const insert = this.db.prepare(`
+      INSERT OR REPLACE INTO playlist_history(
+        week_key, day, video_id, title, artist, url, user_id, user_name, position
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.db.exec('BEGIN');
+    try {
+      for (const day of DAYS) {
+        this.daySongs(day).forEach((song, index) => {
+          insert.run(key, day, song.video_id, song.title, song.artist, song.url, song.user_id, song.user_name, index + 1);
+        });
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   song(id) {
@@ -108,7 +153,7 @@ export class MusicDatabase {
   guildChannels(guildId) {
     return this.db.prepare(`
       SELECT guild_id, request_channel_id, announcement_channel_id, guide_message_id,
-             weekly_message_id, weekly_message_key
+             weekly_message_id, weekly_message_key, day_message_ids
       FROM guild_settings WHERE guild_id=?
     `).get(guildId) ?? null;
   }
@@ -132,6 +177,11 @@ export class MusicDatabase {
       .run(messageId, key, guildId);
   }
 
+  setGuildDayMessages(guildId, messageIds, key) {
+    this.db.prepare('UPDATE guild_settings SET day_message_ids=?, weekly_message_key=?, weekly_message_id=NULL WHERE guild_id=?')
+      .run(JSON.stringify(messageIds), key, guildId);
+  }
+
   resetWeekly() {
     this.db.exec('BEGIN');
     try {
@@ -145,7 +195,7 @@ export class MusicDatabase {
 
   clearAll() {
     this.resetWeekly();
-    this.db.exec('DELETE FROM meta');
+    this.db.exec('DELETE FROM meta; DELETE FROM playlist_history');
   }
 
   meta(key) {
